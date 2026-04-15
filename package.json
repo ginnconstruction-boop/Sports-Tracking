@@ -1,0 +1,39 @@
+{
+  "name": "tracking-the-game",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "test": "tsx --test tests/**/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push"
+  },
+  "dependencies": {
+    "@supabase/ssr": "latest",
+    "@supabase/supabase-js": "latest",
+    "dexie": "latest",
+    "dexie-react-hooks": "latest",
+    "drizzle-orm": "latest",
+    "next": "latest",
+    "pdf-lib": "^1.17.1",
+    "postgres": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "xlsx": "^0.18.5",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "drizzle-kit": "latest",
+    "eslint": "latest",
+    "eslint-config-next": "latest",
+    "tsx": "latest",
+    "typescript": "latest"
+  }
+}

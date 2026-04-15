@@ -1,0 +1,4 @@
+firstName,lastName,preferredName,jerseyNumber,grade,position,offenseRole,defenseRole,specialTeamsRole
+Jordan,Smith,Jordan,18,11,QB,true,false,true
+Marcus,Reed,Marc,34,11,RB,true,false,true
+Elijah,Brown,Eli,52,11,LB,false,true,true
