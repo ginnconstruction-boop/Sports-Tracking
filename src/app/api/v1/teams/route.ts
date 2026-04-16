@@ -6,6 +6,24 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { requireOrganizationRole } from "@/server/auth/context";
 import { createTeam } from "@/server/services/football-admin-service";
 
+type TeamRow = {
+  id: string;
+  organization_id: string;
+  name: string;
+  level: string;
+  archived_at: string | null;
+};
+
+function mapTeam(row: TeamRow) {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    name: row.name,
+    level: row.level,
+    archivedAt: row.archived_at
+  };
+}
+
 export async function GET(request: NextRequest) {
   try {
     const organizationId = request.nextUrl.searchParams.get("organizationId");
@@ -26,7 +44,7 @@ export async function GET(request: NextRequest) {
       throw new Error(error.message);
     }
 
-    return NextResponse.json({ items: data ?? [] });
+    return NextResponse.json({ items: (data ?? []).map((row) => mapTeam(row as TeamRow)) });
   } catch (error) {
     logServerError("teams-route", "list_failed", error, getRuntimeConnectionSummary());
 
@@ -49,7 +67,7 @@ export async function POST(request: NextRequest) {
     }
 
     const team = await createTeam(parsed.data);
-    return NextResponse.json({ item: team }, { status: 201 });
+    return NextResponse.json({ item: mapTeam(team as TeamRow) }, { status: 201 });
   } catch (error) {
     logServerError("teams-route", "create_failed", error, getRuntimeConnectionSummary());
 

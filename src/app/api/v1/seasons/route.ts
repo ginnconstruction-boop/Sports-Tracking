@@ -6,6 +6,26 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { requireOrganizationRole } from "@/server/auth/context";
 import { createSeason } from "@/server/services/football-admin-service";
 
+type SeasonRow = {
+  id: string;
+  team_id: string;
+  label: string;
+  year: number;
+  is_active: boolean;
+  archived_at: string | null;
+};
+
+function mapSeason(row: SeasonRow) {
+  return {
+    id: row.id,
+    teamId: row.team_id,
+    label: row.label,
+    year: row.year,
+    isActive: row.is_active,
+    archivedAt: row.archived_at
+  };
+}
+
 export async function GET(request: NextRequest) {
   try {
     const teamId = request.nextUrl.searchParams.get("teamId");
@@ -41,7 +61,7 @@ export async function GET(request: NextRequest) {
       throw new Error(error.message);
     }
 
-    return NextResponse.json({ items: data ?? [] });
+    return NextResponse.json({ items: (data ?? []).map((row) => mapSeason(row as SeasonRow)) });
   } catch (error) {
     logServerError("seasons-route", "list_failed", error, getRuntimeConnectionSummary());
 
@@ -64,7 +84,7 @@ export async function POST(request: NextRequest) {
     }
 
     const season = await createSeason(parsed.data);
-    return NextResponse.json({ item: season }, { status: 201 });
+    return NextResponse.json({ item: mapSeason(season as SeasonRow) }, { status: 201 });
   } catch (error) {
     logServerError("seasons-route", "create_failed", error, getRuntimeConnectionSummary());
 
