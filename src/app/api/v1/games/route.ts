@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
     const { data, error } = await supabaseAdmin
       .from("games")
       .select(
-        "id,season_id,opponent_id,status,venue_id,kickoff_at,arrival_at,report_at,home_away,current_revision,opponents!inner(school_name),venues(name,city,state)"
+        "id,season_id,opponent_id,status,venue_id,kickoff_at,arrival_at,report_at,home_away,current_revision"
       )
       .eq("season_id", seasonId)
       .order("kickoff_at", { ascending: true, nullsFirst: true })
@@ -58,9 +58,42 @@ export async function GET(request: NextRequest) {
       throw new Error(error.message);
     }
 
-    const items = (data ?? []).map((row) => {
-      const opponent = Array.isArray(row.opponents) ? row.opponents[0] : row.opponents;
-      const venue = Array.isArray(row.venues) ? row.venues[0] : row.venues;
+    const rows = data ?? [];
+    const opponentIds = Array.from(new Set(rows.map((row) => row.opponent_id).filter(Boolean)));
+    const venueIds = Array.from(new Set(rows.map((row) => row.venue_id).filter(Boolean)));
+
+    const [opponentsResult, venuesResult] = await Promise.all([
+      opponentIds.length > 0
+        ? supabaseAdmin
+            .from("opponents")
+            .select("id,school_name")
+            .in("id", opponentIds)
+        : Promise.resolve({ data: [], error: null }),
+      venueIds.length > 0
+        ? supabaseAdmin
+            .from("venues")
+            .select("id,name,city,state")
+            .in("id", venueIds)
+        : Promise.resolve({ data: [], error: null })
+    ]);
+
+    if (opponentsResult.error) {
+      throw new Error(opponentsResult.error.message);
+    }
+
+    if (venuesResult.error) {
+      throw new Error(venuesResult.error.message);
+    }
+
+    const opponentsById = new Map(
+      (opponentsResult.data ?? []).map((opponent) => [opponent.id, opponent.school_name])
+    );
+    const venuesById = new Map(
+      (venuesResult.data ?? []).map((venue) => [venue.id, venue])
+    );
+
+    const items = rows.map((row) => {
+      const venue = row.venue_id ? venuesById.get(row.venue_id) ?? null : null;
 
       return {
         game: {
@@ -75,7 +108,7 @@ export async function GET(request: NextRequest) {
           homeAway: row.home_away,
           currentRevision: row.current_revision
         },
-        opponentSchoolName: opponent?.school_name ?? "Unknown opponent",
+        opponentSchoolName: opponentsById.get(row.opponent_id) ?? "Unknown opponent",
         venueName: venue?.name ?? null,
         venueCity: venue?.city ?? null,
         venueState: venue?.state ?? null
