@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { CreateOrganizationInput } from "@/lib/contracts/admin";
 import { hasRoleAccess, type MembershipRole } from "@/lib/auth/roles";
 import { isEmailAllowedForPrivateBeta, isPrivateBetaInviteOnly } from "@/lib/auth/private-beta";
@@ -103,7 +103,9 @@ export async function requireAuthenticatedUser() {
     throw new Error("Authenticated user must have an email address.");
   }
 
-  if (isPrivateBetaInviteOnly() && !isEmailAllowedForPrivateBeta(email)) {
+  const normalizedEmail = email.trim().toLowerCase();
+
+  if (isPrivateBetaInviteOnly() && !isEmailAllowedForPrivateBeta(normalizedEmail)) {
     throw new Error("This account is not approved for the private beta.");
   }
 
@@ -111,20 +113,20 @@ export async function requireAuthenticatedUser() {
   const displayName =
     user.user_metadata.full_name ??
     [user.user_metadata.first_name, user.user_metadata.last_name].filter(Boolean).join(" ") ??
-    email;
+    normalizedEmail;
 
   try {
     const inserted = await db
       .insert(appUsers)
       .values({
         id: user.id,
-        email,
+        email: normalizedEmail,
         displayName
       })
       .onConflictDoUpdate({
         target: appUsers.id,
         set: {
-          email,
+          email: normalizedEmail,
           displayName
         }
       })
@@ -143,7 +145,7 @@ export async function requireAuthenticatedUser() {
         displayName: appUsers.displayName
       })
       .from(appUsers)
-      .where(eq(appUsers.email, email))
+      .where(sql`lower(${appUsers.email}) = ${normalizedEmail}`)
       .limit(1)
       .then((rows) => rows[0]);
 
