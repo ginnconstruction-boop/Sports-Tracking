@@ -1,57 +1,17 @@
-"use client";
-
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
-import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import type { Route } from "next";
 
 type LoginFormProps = {
   betaBlocked?: boolean;
+  errorMessage?: string | null;
+  infoMessage?: string | null;
 };
 
-export function LoginForm({ betaBlocked = false }: LoginFormProps) {
-  const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
+const passwordLoginRoute = "/auth/login" as Route;
+const magicLinkRoute = "/auth/magic-link" as Route;
 
-  async function handlePasswordLogin(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setMessage(null);
-
-    const supabase = createSupabaseBrowserClient();
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password
-    });
-
-    if (error) {
-      setMessage(error.message);
-      return;
-    }
-
-    startTransition(() => {
-      router.push("/");
-      router.refresh();
-    });
-  }
-
-  async function handleMagicLink() {
-    setMessage(null);
-    const supabase = createSupabaseBrowserClient();
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-        shouldCreateUser: false
-      }
-    });
-
-    setMessage(error ? error.message : "Magic link sent. Check your email.");
-  }
-
+export function LoginForm({ betaBlocked = false, errorMessage, infoMessage }: LoginFormProps) {
   return (
-    <form onSubmit={handlePasswordLogin} className="section-card pad-lg stack-md" style={{ maxWidth: 460 }}>
+    <form action={passwordLoginRoute} method="post" className="section-card pad-lg stack-md" style={{ maxWidth: 460 }}>
       <div className="stack-sm">
         <span className="eyebrow" style={{ background: "rgba(19, 34, 27, 0.08)", color: "#2f4338" }}>
           Supabase Auth
@@ -68,11 +28,20 @@ export function LoginForm({ betaBlocked = false }: LoginFormProps) {
         </p>
       ) : null}
 
+      {errorMessage ? <p className="error-note">{errorMessage}</p> : null}
+      {infoMessage ? (
+        <p
+          className="error-note"
+          style={{ background: "rgba(46, 125, 87, 0.12)", color: "#1d5c3f" }}
+        >
+          {infoMessage}
+        </p>
+      ) : null}
+
       <label className="stack-sm">
         <span>Email</span>
         <input
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
+          name="email"
           type="email"
           required
           style={{
@@ -88,10 +57,8 @@ export function LoginForm({ betaBlocked = false }: LoginFormProps) {
       <label className="stack-sm">
         <span>Password</span>
         <input
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
+          name="password"
           type="password"
-          required
           style={{
             minHeight: 48,
             borderRadius: 14,
@@ -102,16 +69,15 @@ export function LoginForm({ betaBlocked = false }: LoginFormProps) {
         />
       </label>
 
-      {message ? <p className="kicker">{message}</p> : null}
-
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <button className="button-primary" disabled={isPending} type="submit">
-          {isPending ? "Logging in..." : "Log in"}
+        <button className="button-primary" type="submit">
+          Log in
         </button>
         <button
           className="button-secondary"
-          onClick={handleMagicLink}
-          type="button"
+          formAction={magicLinkRoute}
+          formMethod="post"
+          type="submit"
           style={{
             color: "var(--text)",
             borderColor: "rgba(24, 35, 30, 0.18)",
