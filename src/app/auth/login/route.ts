@@ -6,7 +6,7 @@ function redirectWithMessage(request: Request, params: Record<string, string>) {
   for (const [key, value] of Object.entries(params)) {
     url.searchParams.set(key, value);
   }
-  return NextResponse.redirect(url);
+  return NextResponse.redirect(url, { status: 303 });
 }
 
 export async function POST(request: Request) {
@@ -32,5 +32,5 @@ export async function POST(request: Request) {
     });
   }
 
-  return NextResponse.redirect(new URL("/", request.url));
+  return NextResponse.redirect(new URL("/", request.url), { status: 303 });
 }
