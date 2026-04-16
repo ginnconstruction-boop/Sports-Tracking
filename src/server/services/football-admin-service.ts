@@ -234,32 +234,51 @@ export async function updateVenue(input: UpdateVenueInput) {
 
 export async function createGame(input: CreateGameInput) {
   const db = getDb();
+  const supabaseAdmin = createSupabaseAdminClient();
 
-  const season = await db.query.seasons.findFirst({
-    where: eq(seasons.id, input.seasonId)
-  });
+  const { data: season, error: seasonError } = await supabaseAdmin
+    .from("seasons")
+    .select("id,team_id")
+    .eq("id", input.seasonId)
+    .maybeSingle<{ id: string; team_id: string }>();
+
+  if (seasonError) {
+    throw new Error(seasonError.message);
+  }
 
   if (!season) {
     throw new Error("Season not found.");
   }
 
-  const team = await db.query.teams.findFirst({
-    where: eq(teams.id, season.teamId)
-  });
+  const { data: team, error: teamError } = await supabaseAdmin
+    .from("teams")
+    .select("id,organization_id,name,level")
+    .eq("id", season.team_id)
+    .maybeSingle<{ id: string; organization_id: string; name: string; level: string }>();
+
+  if (teamError) {
+    throw new Error(teamError.message);
+  }
 
   if (!team) {
     throw new Error("Team not found for season.");
   }
 
-  const opponent = await db.query.opponents.findFirst({
-    where: eq(opponents.id, input.opponentId)
-  });
+  const { data: opponent, error: opponentError } = await supabaseAdmin
+    .from("opponents")
+    .select("id,school_name,short_code")
+    .eq("id", input.opponentId)
+    .maybeSingle<{ id: string; school_name: string; short_code: string | null }>();
+
+  if (opponentError) {
+    throw new Error(opponentError.message);
+  }
 
   if (!opponent) {
     throw new Error("Opponent not found.");
   }
 
-  await requireOrganizationRole(team.organizationId, "assistant_coach");
+  await requireOrganizationRole(team.organization_id, "assistant_coach");
 
   return db.transaction(async (tx) => {
     const insertedGames = await tx
@@ -283,8 +302,8 @@ export async function createGame(input: CreateGameInput) {
 
     const game = insertedGames[0];
 
-    const homeTeam = input.homeAway === "home" ? team.name : opponent.schoolName;
-    const awayTeam = input.homeAway === "away" ? team.name : opponent.schoolName;
+    const homeTeam = input.homeAway === "home" ? team.name : opponent.school_name;
+    const awayTeam = input.homeAway === "away" ? team.name : opponent.school_name;
 
     const insertedSides = await tx
       .insert(gameSides)
@@ -294,14 +313,14 @@ export async function createGame(input: CreateGameInput) {
         side: "home",
         isPrimaryTeam: input.homeAway === "home",
         displayName: homeTeam,
-        shortCode: input.homeAway === "home" ? team.level : opponent.shortCode ?? undefined
+        shortCode: input.homeAway === "home" ? team.level : opponent.short_code ?? undefined
       },
       {
         gameId: game.id,
         side: "away",
         isPrimaryTeam: input.homeAway === "away",
         displayName: awayTeam,
-        shortCode: input.homeAway === "away" ? team.level : opponent.shortCode ?? undefined
+        shortCode: input.homeAway === "away" ? team.level : opponent.short_code ?? undefined
       }
       ])
       .returning();
