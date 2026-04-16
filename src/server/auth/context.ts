@@ -113,27 +113,46 @@ export async function requireAuthenticatedUser() {
     [user.user_metadata.first_name, user.user_metadata.last_name].filter(Boolean).join(" ") ??
     email;
 
-  const inserted = await db
-    .insert(appUsers)
-    .values({
-      id: user.id,
-      email,
-      displayName
-    })
-    .onConflictDoUpdate({
-      target: appUsers.id,
-      set: {
+  try {
+    const inserted = await db
+      .insert(appUsers)
+      .values({
+        id: user.id,
         email,
         displayName
-      }
-    })
-    .returning({
-      id: appUsers.id,
-      email: appUsers.email,
-      displayName: appUsers.displayName
-    });
+      })
+      .onConflictDoUpdate({
+        target: appUsers.id,
+        set: {
+          email,
+          displayName
+        }
+      })
+      .returning({
+        id: appUsers.id,
+        email: appUsers.email,
+        displayName: appUsers.displayName
+      });
 
-  return inserted[0];
+    return inserted[0];
+  } catch (error) {
+    const existingByEmail = await db
+      .select({
+        id: appUsers.id,
+        email: appUsers.email,
+        displayName: appUsers.displayName
+      })
+      .from(appUsers)
+      .where(eq(appUsers.email, email))
+      .limit(1)
+      .then((rows) => rows[0]);
+
+    if (existingByEmail) {
+      return existingByEmail;
+    }
+
+    throw error;
+  }
 }
 
 export async function requireOrganizationRole(organizationId: string, minimumRole: MembershipRole) {
