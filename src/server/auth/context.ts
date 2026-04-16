@@ -21,9 +21,16 @@ async function ensureStarterOrganizationMembership(user: { id: string; email: st
   const slug = `${slugBase}-${user.id.slice(0, 8)}`.slice(0, 80);
 
   const existingOrganization =
-    (await db.query.organizations.findFirst({
-      where: eq(organizations.slug, slug)
-    })) ??
+    (await db
+      .select({
+        id: organizations.id,
+        name: organizations.name,
+        slug: organizations.slug
+      })
+      .from(organizations)
+      .where(eq(organizations.slug, slug))
+      .limit(1)
+      .then((rows) => rows[0])) ??
     (
       await db
         .insert(organizations)
@@ -31,15 +38,28 @@ async function ensureStarterOrganizationMembership(user: { id: string; email: st
           name: organizationName,
           slug
         })
-        .returning()
+        .returning({
+          id: organizations.id,
+          name: organizations.name,
+          slug: organizations.slug
+        })
     )[0];
 
-  const existingMembership = await db.query.organizationMemberships.findFirst({
-    where: and(
-      eq(organizationMemberships.organizationId, existingOrganization.id),
-      eq(organizationMemberships.userId, user.id)
+  const existingMembership = await db
+    .select({
+      organizationId: organizationMemberships.organizationId,
+      userId: organizationMemberships.userId,
+      role: organizationMemberships.role
+    })
+    .from(organizationMemberships)
+    .where(
+      and(
+        eq(organizationMemberships.organizationId, existingOrganization.id),
+        eq(organizationMemberships.userId, user.id)
+      )
     )
-  });
+    .limit(1)
+    .then((rows) => rows[0]);
 
   if (!existingMembership) {
     await db.insert(organizationMemberships).values({
@@ -72,9 +92,16 @@ export async function requireAuthenticatedUser() {
   }
 
   const db = getDb();
-  const existing = await db.query.appUsers.findFirst({
-    where: eq(appUsers.id, user.id)
-  });
+  const existing = await db
+    .select({
+      id: appUsers.id,
+      email: appUsers.email,
+      displayName: appUsers.displayName
+    })
+    .from(appUsers)
+    .where(eq(appUsers.id, user.id))
+    .limit(1)
+    .then((rows) => rows[0]);
 
   if (existing) {
     return existing;
@@ -90,7 +117,11 @@ export async function requireAuthenticatedUser() {
         [user.user_metadata.first_name, user.user_metadata.last_name].filter(Boolean).join(" ") ??
         email
     })
-    .returning();
+    .returning({
+      id: appUsers.id,
+      email: appUsers.email,
+      displayName: appUsers.displayName
+    });
 
   return inserted[0];
 }
@@ -99,12 +130,21 @@ export async function requireOrganizationRole(organizationId: string, minimumRol
   const user = await requireAuthenticatedUser();
   const db = getDb();
 
-  const membership = await db.query.organizationMemberships.findFirst({
-    where: and(
-      eq(organizationMemberships.organizationId, organizationId),
-      eq(organizationMemberships.userId, user.id)
+  const membership = await db
+    .select({
+      organizationId: organizationMemberships.organizationId,
+      userId: organizationMemberships.userId,
+      role: organizationMemberships.role
+    })
+    .from(organizationMemberships)
+    .where(
+      and(
+        eq(organizationMemberships.organizationId, organizationId),
+        eq(organizationMemberships.userId, user.id)
+      )
     )
-  });
+    .limit(1)
+    .then((rows) => rows[0]);
 
   if (!membership || !hasRoleAccess(membership.role, minimumRole)) {
     throw new Error("Insufficient permissions for this organization.");

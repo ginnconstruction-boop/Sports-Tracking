@@ -113,7 +113,7 @@ type Props = {
   memberships?: OrganizationMembership[];
 };
 
-type SetupStage = "team" | "season" | "details" | "schedule" | "roster";
+type SetupStage = "organization" | "team" | "season" | "details" | "schedule" | "roster";
 
 const EMPTY_MEMBERSHIPS: OrganizationMembership[] = [];
 
@@ -262,7 +262,7 @@ export function SetupConsole({ memberships }: Props) {
   const [scheduleSearch, setScheduleSearch] = useState("");
   const [scheduleStatusFilter, setScheduleStatusFilter] = useState<"all" | GameForm["status"]>("all");
   const [scheduleSideFilter, setScheduleSideFilter] = useState<"all" | GameForm["homeAway"]>("all");
-  const [activeStep, setActiveStep] = useState<SetupStage>("team");
+  const [activeStep, setActiveStep] = useState<SetupStage>("organization");
   const [statusText, setStatusText] = useState(
     providedMemberships.length > 0 ? "Choose an organization to manage." : "Loading setup..."
   );
@@ -299,23 +299,24 @@ export function SetupConsole({ memberships }: Props) {
   }, [games, scheduleSearch, scheduleSideFilter, scheduleStatusFilter]);
   const flowSteps = useMemo(
     () => [
-      { key: "team" as const, label: "1. Team", enabled: hasOrganization, complete: hasTeams },
-      { key: "season" as const, label: "2. Season", enabled: hasTeams, complete: hasSeasons },
+      { key: "organization" as const, label: "1. Organization", enabled: true, complete: hasOrganization },
+      { key: "team" as const, label: "2. Team", enabled: hasOrganization, complete: hasTeams },
+      { key: "season" as const, label: "3. Season", enabled: hasTeams, complete: hasSeasons },
       {
         key: "details" as const,
-        label: "3. Opponent + venue",
+        label: "4. Opponent + venue",
         enabled: hasSeasons,
         complete: hasOpponents && hasVenues
       },
       {
         key: "schedule" as const,
-        label: "4. Schedule",
+        label: "5. Schedule",
         enabled: hasSeasons && hasOpponents,
         complete: hasGames
       },
       {
         key: "roster" as const,
-        label: "5. Roster",
+        label: "6. Roster",
         enabled: hasSeasons,
         complete: rosterDraft.length > 0
       }
@@ -419,12 +420,12 @@ export function SetupConsole({ memberships }: Props) {
   }, [selectedSeasonId, availableOpponents, availableVenues]);
 
   useEffect(() => {
-    if (activeStep === "team" || activeStepMeta.enabled) {
+    if (activeStep === "organization" || activeStepMeta.enabled) {
       return;
     }
 
     if (!hasOrganization) {
-      setActiveStep("team");
+      setActiveStep("organization");
       return;
     }
 
@@ -1036,9 +1037,41 @@ export function SetupConsole({ memberships }: Props) {
           ))}
         </div>
         <p className="kicker">
-          Current step: <strong>{activeStepMeta.label}</strong>. Team comes first, roster opens once a season exists, and you can revisit any unlocked step anytime.
+          Current step: <strong>{activeStepMeta.label}</strong>. Organization comes first, team comes next, roster opens once a season exists, and you can revisit any unlocked step anytime.
         </p>
       </section>
+
+      {activeStep === "organization" ? (
+      <section className="section-card pad-lg stack-md">
+        <div className="entry-header">
+          <div>
+            <h2 style={{ margin: 0 }}>Organization</h2>
+            <p className="kicker">
+              Your first setup step is choosing or creating the program workspace everything else will live under.
+            </p>
+          </div>
+          <span className="chip">{hasOrganization ? "Organization ready" : "Waiting for organization"}</span>
+        </div>
+        <div className="table-like">
+          <div className="timeline-card">
+            <div className="timeline-top">
+              <strong>{availableMemberships[0]?.organizationName ?? "No organization available yet"}</strong>
+              <span className="mono">{availableMemberships[0]?.role ?? "pending"}</span>
+            </div>
+            <div className="kicker">
+              {hasOrganization
+                ? "This organization will be used for teams, seasons, schedule, roster, and reports. Continue to Team when ready."
+                : "The app is still trying to load or create your starter organization. If this does not fill in after refresh, the status chip message above will tell us why."}
+            </div>
+            <div className="timeline-actions">
+              <button className="button-primary" disabled={!hasOrganization} type="button" onClick={() => setActiveStep("team")}>
+                Continue to team
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+      ) : null}
 
       {activeStep === "team" ? (
       <section className="two-column">
