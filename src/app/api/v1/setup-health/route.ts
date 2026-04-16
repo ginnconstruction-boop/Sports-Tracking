@@ -1,11 +1,8 @@
-import { eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { logServerError } from "@/lib/server/observability";
 import { getRuntimeConnectionSummary } from "@/lib/server/runtime-diagnostics";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { getDb } from "@/server/db/client";
-import { appUsers, organizationMemberships, organizations } from "@/server/db/schema";
 
 export async function GET() {
   const runtime = getRuntimeConnectionSummary();
@@ -28,64 +25,7 @@ export async function GET() {
     }
 
     const normalizedEmail = user.email.trim().toLowerCase();
-    const directDb = getDb();
     const supabaseAdmin = createSupabaseAdminClient();
-
-    const direct = await (async () => {
-      try {
-        const byId = await directDb
-          .select({
-            id: appUsers.id,
-            email: appUsers.email,
-            displayName: appUsers.displayName
-          })
-          .from(appUsers)
-          .where(eq(appUsers.id, user.id))
-          .limit(1)
-          .then((rows) => rows[0] ?? null);
-
-        const byEmail = await directDb
-          .select({
-            id: appUsers.id,
-            email: appUsers.email,
-            displayName: appUsers.displayName
-          })
-          .from(appUsers)
-          .where(sql`lower(${appUsers.email}) = ${normalizedEmail}`)
-          .limit(1)
-          .then((rows) => rows[0] ?? null);
-
-        const memberships = await directDb
-          .select({
-            organizationId: organizationMemberships.organizationId,
-            role: organizationMemberships.role
-          })
-          .from(organizationMemberships)
-          .where(eq(organizationMemberships.userId, user.id));
-
-        const orgs = await directDb
-          .select({
-            id: organizations.id,
-            name: organizations.name,
-            slug: organizations.slug
-          })
-          .from(organizations)
-          .limit(10);
-
-        return {
-          ok: true,
-          byId,
-          byEmail,
-          memberships,
-          organizations: orgs
-        };
-      } catch (error) {
-        return {
-          ok: false,
-          error: error instanceof Error ? error.message : String(error)
-        };
-      }
-    })();
 
     const admin = await (async () => {
       try {
@@ -125,7 +65,6 @@ export async function GET() {
         id: user.id,
         email: normalizedEmail
       },
-      direct,
       admin
     });
   } catch (error) {
