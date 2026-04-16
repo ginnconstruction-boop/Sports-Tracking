@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useEffectEvent, useMemo, useState, useTransition } from "react";
 import type { GameDaySnapshot } from "@/lib/domain/game-day";
 import type { PlayRecord } from "@/lib/domain/play-log";
 import { isFeatureEnabled } from "@/lib/features/runtime";
@@ -396,90 +396,97 @@ export function GameDayConsole({ gameId, initialSnapshot }: GameDayConsoleProps)
     }
   }
 
+  const connectToSession = useEffectEvent(async (nextDeviceKey: string) => {
+    const [cachedGame, cachedSession] = await Promise.all([
+      getOfflineGameCache(gameId),
+      getOfflineSession(gameId)
+    ]);
+
+    if (cachedGame) {
+      setSnapshot(cachedGame.snapshot);
+      setPlayLog(cachedGame.playLog);
+      setStatusText("Loaded cached sideline state.");
+    }
+
+    if (cachedSession) {
+      setSession(statusFromOfflineSession(cachedSession));
+    }
+
+    try {
+      await hydrateFromServer(nextDeviceKey);
+      await flushOutbox(nextDeviceKey);
+      setBusyAction(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to open the game session.";
+      captureClientIssue("connect_failed", error);
+      if (isWriterConflict(message)) {
+        try {
+          await hydrateFromServer(nextDeviceKey, false);
+          setErrorText(message);
+          setStatusText("Viewer mode. Another writer currently holds the lease.");
+          setBusyAction(null);
+          return;
+        } catch {
+          // Fall through to cached/offline handling below if viewer open also fails.
+        }
+      }
+
+      if (cachedGame) {
+        const fallbackSession =
+          statusFromOfflineSession(cachedSession) ??
+          ({
+            id: gameId,
+            status: "local_only",
+            isActiveWriter: true,
+            localRevision: cachedGame.snapshot.revision,
+            remoteRevision: cachedGame.snapshot.revision,
+            writerLeaseExpiresAt: null
+          } satisfies GameSessionRecord);
+
+        setSession(fallbackSession);
+        setIsOffline(true);
+        setErrorText(null);
+        setStatusText("Offline local mode.");
+        setBusyAction(null);
+        await persistLocalState(cachedGame.snapshot, cachedGame.playLog, fallbackSession);
+        return;
+      }
+
+      setErrorText(message);
+      setStatusText("Read-only mode.");
+      setBusyAction(null);
+    }
+  });
+
+  const releaseWriterLeaseOnPageHide = useEffectEvent(() => {
+    void releaseWriterLease();
+  });
+
+  const flushOutboxOnReconnect = useEffectEvent(() => {
+    setIsOffline(false);
+    if (deviceKey) {
+      void flushOutbox(deviceKey);
+    }
+  });
+
   useEffect(() => {
     const nextDeviceKey = getDeviceKey();
     setDeviceKey(nextDeviceKey);
-
-    async function connect() {
-      const [cachedGame, cachedSession] = await Promise.all([
-        getOfflineGameCache(gameId),
-        getOfflineSession(gameId)
-      ]);
-
-      if (cachedGame) {
-        setSnapshot(cachedGame.snapshot);
-        setPlayLog(cachedGame.playLog);
-        setStatusText("Loaded cached sideline state.");
-      }
-
-      if (cachedSession) {
-        setSession(statusFromOfflineSession(cachedSession));
-      }
-
-      try {
-        await hydrateFromServer(nextDeviceKey);
-        await flushOutbox(nextDeviceKey);
-        setBusyAction(null);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Unable to open the game session.";
-        captureClientIssue("connect_failed", error);
-        if (isWriterConflict(message)) {
-          try {
-            await hydrateFromServer(nextDeviceKey, false);
-            setErrorText(message);
-            setStatusText("Viewer mode. Another writer currently holds the lease.");
-            setBusyAction(null);
-            return;
-          } catch {
-            // Fall through to cached/offline handling below if viewer open also fails.
-          }
-        }
-
-        if (cachedGame) {
-          const fallbackSession =
-            statusFromOfflineSession(cachedSession) ??
-            ({
-              id: gameId,
-              status: "local_only",
-              isActiveWriter: true,
-              localRevision: cachedGame.snapshot.revision,
-              remoteRevision: cachedGame.snapshot.revision,
-              writerLeaseExpiresAt: null
-            } satisfies GameSessionRecord);
-
-          setSession(fallbackSession);
-          setIsOffline(true);
-          setErrorText(null);
-          setStatusText("Offline local mode.");
-          setBusyAction(null);
-          await persistLocalState(cachedGame.snapshot, cachedGame.playLog, fallbackSession);
-          return;
-        }
-
-        setErrorText(message);
-        setStatusText("Read-only mode.");
-        setBusyAction(null);
-      }
-    }
-
-    void connect();
+    void connectToSession(nextDeviceKey);
   }, [gameId]);
 
   useEffect(() => {
     function handlePageHide() {
-      void releaseWriterLease();
+      releaseWriterLeaseOnPageHide();
     }
 
     window.addEventListener("pagehide", handlePageHide);
     return () => window.removeEventListener("pagehide", handlePageHide);
-  }, [deviceKey, errorText, gameId, pendingMutations, playLog, session?.isActiveWriter, snapshot]);
+  }, []);
 
   useEffect(() => {
     function handleOnline() {
-      setIsOffline(false);
-      if (deviceKey) {
-        void flushOutbox(deviceKey);
-      }
+      flushOutboxOnReconnect();
     }
 
     function handleOffline() {
@@ -494,7 +501,7 @@ export function GameDayConsole({ gameId, initialSnapshot }: GameDayConsoleProps)
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
     };
-  }, [deviceKey, playLog, snapshot, session]);
+  }, []);
 
   useEffect(() => {
     if (!deviceKey || !session?.isActiveWriter || isOffline) return;

@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
 import { createSeasonInputSchema } from "@/lib/contracts/admin";
 import { logServerError } from "@/lib/server/observability";
 import { getRuntimeConnectionSummary } from "@/lib/server/runtime-diagnostics";
-import { getDb } from "@/server/db/client";
-import { seasons, teams } from "@/server/db/schema";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { requireOrganizationRole } from "@/server/auth/context";
 import { createSeason } from "@/server/services/football-admin-service";
 
@@ -16,17 +14,34 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "teamId is required." }, { status: 400 });
     }
 
-    const db = getDb();
-    const team = await db.query.teams.findFirst({ where: eq(teams.id, teamId) });
+    const supabaseAdmin = createSupabaseAdminClient();
+    const { data: team, error: teamError } = await supabaseAdmin
+      .from("teams")
+      .select("id,organization_id")
+      .eq("id", teamId)
+      .maybeSingle<{ id: string; organization_id: string }>();
+
+    if (teamError) {
+      throw new Error(teamError.message);
+    }
 
     if (!team) {
       return NextResponse.json({ error: "team not found" }, { status: 404 });
     }
 
-    await requireOrganizationRole(team.organizationId, "read_only");
-    const rows = await db.select().from(seasons).where(eq(seasons.teamId, teamId));
+    await requireOrganizationRole(team.organization_id, "read_only");
 
-    return NextResponse.json({ items: rows });
+    const { data, error } = await supabaseAdmin
+      .from("seasons")
+      .select("*")
+      .eq("team_id", teamId)
+      .order("year", { ascending: false });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return NextResponse.json({ items: data ?? [] });
   } catch (error) {
     logServerError("seasons-route", "list_failed", error, getRuntimeConnectionSummary());
 

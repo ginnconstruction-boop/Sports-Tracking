@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
 import { createTeamInputSchema } from "@/lib/contracts/admin";
 import { logServerError } from "@/lib/server/observability";
 import { getRuntimeConnectionSummary } from "@/lib/server/runtime-diagnostics";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { requireOrganizationRole } from "@/server/auth/context";
-import { getDb } from "@/server/db/client";
-import { teams } from "@/server/db/schema";
 import { createTeam } from "@/server/services/football-admin-service";
 
 export async function GET(request: NextRequest) {
@@ -17,10 +15,18 @@ export async function GET(request: NextRequest) {
     }
 
     await requireOrganizationRole(organizationId, "read_only");
-    const db = getDb();
-    const rows = await db.select().from(teams).where(eq(teams.organizationId, organizationId));
+    const supabaseAdmin = createSupabaseAdminClient();
+    const { data, error } = await supabaseAdmin
+      .from("teams")
+      .select("*")
+      .eq("organization_id", organizationId)
+      .order("created_at", { ascending: true });
 
-    return NextResponse.json({ items: rows });
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return NextResponse.json({ items: data ?? [] });
   } catch (error) {
     logServerError("teams-route", "list_failed", error, getRuntimeConnectionSummary());
 

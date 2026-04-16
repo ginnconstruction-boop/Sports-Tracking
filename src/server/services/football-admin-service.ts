@@ -12,6 +12,7 @@ import {
   type UpdateVenueInput,
   type ReplaceSeasonRosterInput
 } from "@/lib/contracts/admin";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { requireOrganizationRole } from "@/server/auth/context";
 import { getDb } from "@/server/db/client";
 import {
@@ -29,18 +30,22 @@ import {
 
 export async function createTeam(input: CreateTeamInput) {
   await requireOrganizationRole(input.organizationId, "admin");
-  const db = getDb();
-
-  const created = await db
-    .insert(teams)
-    .values({
-      organizationId: input.organizationId,
+  const supabaseAdmin = createSupabaseAdminClient();
+  const { data, error } = await supabaseAdmin
+    .from("teams")
+    .insert({
+      organization_id: input.organizationId,
       name: input.name,
       level: input.level
     })
-    .returning();
+    .select()
+    .single();
 
-  return created[0];
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
 }
 
 export async function updateTeam(input: UpdateTeamInput) {
@@ -65,28 +70,39 @@ export async function updateTeam(input: UpdateTeamInput) {
 }
 
 export async function createSeason(input: CreateSeasonInput) {
-  const db = getDb();
-  const team = await db.query.teams.findFirst({
-    where: eq(teams.id, input.teamId)
-  });
+  const supabaseAdmin = createSupabaseAdminClient();
+  const { data: team, error: teamError } = await supabaseAdmin
+    .from("teams")
+    .select("id,organization_id")
+    .eq("id", input.teamId)
+    .maybeSingle<{ id: string; organization_id: string }>();
+
+  if (teamError) {
+    throw new Error(teamError.message);
+  }
 
   if (!team) {
     throw new Error("Team not found.");
   }
 
-  await requireOrganizationRole(team.organizationId, "head_coach");
+  await requireOrganizationRole(team.organization_id, "head_coach");
 
-  const created = await db
-    .insert(seasons)
-    .values({
-      teamId: input.teamId,
+  const { data, error } = await supabaseAdmin
+    .from("seasons")
+    .insert({
+      team_id: input.teamId,
       label: input.label,
       year: input.year,
-      isActive: input.isActive
+      is_active: input.isActive
     })
-    .returning();
+    .select()
+    .single();
 
-  return created[0];
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
 }
 
 export async function updateSeason(input: UpdateSeasonInput) {
@@ -125,19 +141,23 @@ export async function updateSeason(input: UpdateSeasonInput) {
 
 export async function createOpponent(input: CreateOpponentInput) {
   await requireOrganizationRole(input.organizationId, "assistant_coach");
-  const db = getDb();
-
-  const created = await db
-    .insert(opponents)
-    .values({
-      organizationId: input.organizationId,
-      schoolName: input.schoolName,
-      mascot: input.mascot,
-      shortCode: input.shortCode
+  const supabaseAdmin = createSupabaseAdminClient();
+  const { data, error } = await supabaseAdmin
+    .from("opponents")
+    .insert({
+      organization_id: input.organizationId,
+      school_name: input.schoolName,
+      mascot: input.mascot || null,
+      short_code: input.shortCode || null
     })
-    .returning();
+    .select()
+    .single();
 
-  return created[0];
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
 }
 
 export async function updateOpponent(input: UpdateOpponentInput) {
@@ -164,23 +184,27 @@ export async function updateOpponent(input: UpdateOpponentInput) {
 
 export async function createVenue(input: CreateVenueInput) {
   await requireOrganizationRole(input.organizationId, "assistant_coach");
-  const db = getDb();
-
-  const created = await db
-    .insert(venues)
-    .values({
-      organizationId: input.organizationId,
+  const supabaseAdmin = createSupabaseAdminClient();
+  const { data, error } = await supabaseAdmin
+    .from("venues")
+    .insert({
+      organization_id: input.organizationId,
       name: input.name,
-      fieldName: input.fieldName,
-      addressLine1: input.addressLine1,
-      addressLine2: input.addressLine2,
-      city: input.city,
-      state: input.state,
-      postalCode: input.postalCode
+      field_name: input.fieldName || null,
+      address_line_1: input.addressLine1 || null,
+      address_line_2: input.addressLine2 || null,
+      city: input.city || null,
+      state: input.state || null,
+      postal_code: input.postalCode || null
     })
-    .returning();
+    .select()
+    .single();
 
-  return created[0];
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
 }
 
 export async function updateVenue(input: UpdateVenueInput) {
