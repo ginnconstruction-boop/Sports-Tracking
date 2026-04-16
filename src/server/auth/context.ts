@@ -1,4 +1,5 @@
 import { and, eq } from "drizzle-orm";
+import type { CreateOrganizationInput } from "@/lib/contracts/admin";
 import { hasRoleAccess, type MembershipRole } from "@/lib/auth/roles";
 import { isEmailAllowedForPrivateBeta, isPrivateBetaInviteOnly } from "@/lib/auth/private-beta";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -14,28 +15,36 @@ function slugify(value: string) {
 }
 
 async function ensureStarterOrganizationMembership(user: { id: string; email: string; displayName: string }) {
-  const db = getDb();
   const baseName = user.displayName.trim() || user.email.split("@")[0] || "Tracking the Game";
-  const organizationName = `${baseName} Program`;
-  const slugBase = slugify(baseName) || "tracking-the-game";
+  await createOrganizationForUserRecord(user, { name: `${baseName} Program` });
+}
+
+async function createOrganizationForUserRecord(
+  user: { id: string; email: string; displayName: string },
+  input: CreateOrganizationInput
+) {
+  const db = getDb();
+  const slugBase = slugify(input.name) || "tracking-the-game";
   const slug = `${slugBase}-${user.id.slice(0, 8)}`.slice(0, 80);
 
-  const existingOrganization =
-    (await db
-      .select({
-        id: organizations.id,
-        name: organizations.name,
-        slug: organizations.slug
-      })
-      .from(organizations)
-      .where(eq(organizations.slug, slug))
-      .limit(1)
-      .then((rows) => rows[0])) ??
+  const existingOrganization = await db
+    .select({
+      id: organizations.id,
+      name: organizations.name,
+      slug: organizations.slug
+    })
+    .from(organizations)
+    .where(eq(organizations.slug, slug))
+    .limit(1)
+    .then((rows) => rows[0]);
+
+  const organization =
+    existingOrganization ??
     (
       await db
         .insert(organizations)
         .values({
-          name: organizationName,
+          name: input.name,
           slug
         })
         .returning({
@@ -54,7 +63,7 @@ async function ensureStarterOrganizationMembership(user: { id: string; email: st
     .from(organizationMemberships)
     .where(
       and(
-        eq(organizationMemberships.organizationId, existingOrganization.id),
+        eq(organizationMemberships.organizationId, organization.id),
         eq(organizationMemberships.userId, user.id)
       )
     )
@@ -63,11 +72,18 @@ async function ensureStarterOrganizationMembership(user: { id: string; email: st
 
   if (!existingMembership) {
     await db.insert(organizationMemberships).values({
-      organizationId: existingOrganization.id,
+      organizationId: organization.id,
       userId: user.id,
       role: "admin"
     });
   }
+
+  return organization;
+}
+
+export async function createOrganizationForCurrentUser(input: CreateOrganizationInput) {
+  const user = await requireAuthenticatedUser();
+  return createOrganizationForUserRecord(user, input);
 }
 
 export async function requireAuthenticatedUser() {

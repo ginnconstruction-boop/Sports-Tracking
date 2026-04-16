@@ -108,6 +108,9 @@ type RosterForm = {
   defenseRole: boolean;
   specialTeamsRole: boolean;
 };
+type OrganizationForm = {
+  name: string;
+};
 
 type Props = {
   memberships?: OrganizationMembership[];
@@ -263,6 +266,7 @@ export function SetupConsole({ memberships }: Props) {
   const [scheduleStatusFilter, setScheduleStatusFilter] = useState<"all" | GameForm["status"]>("all");
   const [scheduleSideFilter, setScheduleSideFilter] = useState<"all" | GameForm["homeAway"]>("all");
   const [activeStep, setActiveStep] = useState<SetupStage>("organization");
+  const [organizationForm, setOrganizationForm] = useState<OrganizationForm>({ name: "" });
   const [statusText, setStatusText] = useState(
     providedMemberships.length > 0 ? "Choose an organization to manage." : "Loading setup..."
   );
@@ -483,6 +487,44 @@ export function SetupConsole({ memberships }: Props) {
       homeAway: "home",
       status: "scheduled"
     });
+  }
+
+  async function saveOrganization() {
+    if (!organizationForm.name.trim()) {
+      setStatusText("Enter an organization name before creating it.");
+      return;
+    }
+
+    setIsBusy(true);
+    setStatusText("Creating organization...");
+
+    try {
+      const response = await readJson<{ item: { id: string; name: string; slug: string } }>("/api/v1/organizations", {
+        method: "POST",
+        body: JSON.stringify({ name: organizationForm.name.trim() })
+      });
+
+      const nextMembership: OrganizationMembership = {
+        organizationId: response.item.id,
+        organizationName: response.item.name,
+        organizationSlug: response.item.slug,
+        role: "admin"
+      };
+
+      setAvailableMemberships((current) =>
+        current.some((membership) => membership.organizationId === nextMembership.organizationId)
+          ? current
+          : [...current, nextMembership]
+      );
+      setOrganizationId(response.item.id);
+      setOrganizationForm({ name: "" });
+      setStatusText("Organization created.");
+      setActiveStep("team");
+    } catch (error) {
+      setStatusText(messageFromError(error, "Unable to create organization."));
+    } finally {
+      setIsBusy(false);
+    }
   }
 
   async function saveTeam() {
@@ -1061,9 +1103,29 @@ export function SetupConsole({ memberships }: Props) {
             <div className="kicker">
               {hasOrganization
                 ? "This organization will be used for teams, seasons, schedule, roster, and reports. Continue to Team when ready."
-                : "The app is still trying to load or create your starter organization. If this does not fill in after refresh, the status chip message above will tell us why."}
+                : "Create your organization here first. Once it exists, the Team step unlocks automatically."}
             </div>
             <div className="timeline-actions">
+              {!hasOrganization ? (
+                <>
+                  <label className="field" style={{ minWidth: 280 }}>
+                    <span>Organization name</span>
+                    <input
+                      value={organizationForm.name}
+                      onChange={(event) => setOrganizationForm({ name: event.target.value })}
+                      placeholder="Ginn Construction Varsity"
+                    />
+                  </label>
+                  <button
+                    className="button-primary"
+                    disabled={isBusy || !organizationForm.name.trim()}
+                    type="button"
+                    onClick={() => void saveOrganization()}
+                  >
+                    Create organization
+                  </button>
+                </>
+              ) : null}
               <button className="button-primary" disabled={!hasOrganization} type="button" onClick={() => setActiveStep("team")}>
                 Continue to team
               </button>

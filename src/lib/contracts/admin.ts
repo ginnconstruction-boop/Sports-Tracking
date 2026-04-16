@@ -28,6 +28,10 @@ export const createTeamInputSchema = z.object({
   level: z.string().min(1).max(80)
 });
 
+export const createOrganizationInputSchema = z.object({
+  name: z.string().min(1).max(160)
+});
+
 export const updateTeamInputSchema = createTeamInputSchema.extend({
   teamId: z.string().uuid(),
   archived: z.boolean().optional()
@@ -136,6 +140,7 @@ export const importSeasonRosterCsvInputSchema = z.object({
 });
 
 export type CreateTeamInput = z.infer<typeof createTeamInputSchema>;
+export type CreateOrganizationInput = z.infer<typeof createOrganizationInputSchema>;
 export type UpdateTeamInput = z.infer<typeof updateTeamInputSchema>;
 export type CreateSeasonInput = z.infer<typeof createSeasonInputSchema>;
 export type UpdateSeasonInput = z.infer<typeof updateSeasonInputSchema>;
