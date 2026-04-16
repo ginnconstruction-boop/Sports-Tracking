@@ -108,30 +108,24 @@ export async function requireAuthenticatedUser() {
   }
 
   const db = getDb();
-  const existing = await db
-    .select({
-      id: appUsers.id,
-      email: appUsers.email,
-      displayName: appUsers.displayName
-    })
-    .from(appUsers)
-    .where(eq(appUsers.id, user.id))
-    .limit(1)
-    .then((rows) => rows[0]);
-
-  if (existing) {
-    return existing;
-  }
+  const displayName =
+    user.user_metadata.full_name ??
+    [user.user_metadata.first_name, user.user_metadata.last_name].filter(Boolean).join(" ") ??
+    email;
 
   const inserted = await db
     .insert(appUsers)
     .values({
       id: user.id,
       email,
-      displayName:
-        user.user_metadata.full_name ??
-        [user.user_metadata.first_name, user.user_metadata.last_name].filter(Boolean).join(" ") ??
-        email
+      displayName
+    })
+    .onConflictDoUpdate({
+      target: appUsers.id,
+      set: {
+        email,
+        displayName
+      }
     })
     .returning({
       id: appUsers.id,
