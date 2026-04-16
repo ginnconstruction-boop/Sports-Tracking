@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { isEmailAllowedForPrivateBeta, isPrivateBetaInviteOnly } from "@/lib/auth/private-beta";
 import { getSupabaseEnv } from "@/lib/supabase/env";
 
-const PUBLIC_PATHS = ["/login", "/auth/callback", "/api/health", "/public"];
+const PUBLIC_PATHS = ["/login", "/auth/callback", "/auth/login", "/auth/magic-link", "/api/health", "/public"];
 
 function isPublicPath(pathname: string) {
   return PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
