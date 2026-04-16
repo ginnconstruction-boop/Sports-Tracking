@@ -139,9 +139,12 @@ async function readJson<T>(input: RequestInfo, init?: RequestInit) {
       ...(init?.headers ?? {})
     }
   });
-  const body = await response.json();
+  const text = await response.text();
+  const body = text ? JSON.parse(text) : null;
   if (!response.ok) {
-    throw body;
+    throw body ?? {
+      error: `Request failed with status ${response.status}.`
+    };
   }
   return body as T;
 }
@@ -215,14 +218,15 @@ function toDateTimeLocalValue(value?: string | null) {
   return local.toISOString().slice(0, 16);
 }
 
-export function SetupConsole({ memberships = [] }: Props) {
+export function SetupConsole({ memberships }: Props) {
+  const providedMemberships = memberships ?? [];
   const showBranding = isFeatureEnabled("organization_branding");
   const showTeamManagement = isFeatureEnabled("team_management");
   const showSeasonManagement = isFeatureEnabled("season_management");
   const showOpponentManagement = isFeatureEnabled("opponent_management");
   const showRosterImport = isFeatureEnabled("roster_import_csv");
-  const [availableMemberships, setAvailableMemberships] = useState<OrganizationMembership[]>(memberships);
-  const [organizationId, setOrganizationId] = useState(memberships[0]?.organizationId ?? "");
+  const [availableMemberships, setAvailableMemberships] = useState<OrganizationMembership[]>(providedMemberships);
+  const [organizationId, setOrganizationId] = useState(providedMemberships[0]?.organizationId ?? "");
   const [teams, setTeams] = useState<Team[]>([]);
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [opponents, setOpponents] = useState<Opponent[]>([]);
@@ -255,7 +259,7 @@ export function SetupConsole({ memberships = [] }: Props) {
   const [scheduleStatusFilter, setScheduleStatusFilter] = useState<"all" | GameForm["status"]>("all");
   const [scheduleSideFilter, setScheduleSideFilter] = useState<"all" | GameForm["homeAway"]>("all");
   const [statusText, setStatusText] = useState(
-    memberships.length > 0 ? "Choose an organization to manage." : "Loading setup..."
+    providedMemberships.length > 0 ? "Choose an organization to manage." : "Loading setup..."
   );
   const [isBusy, setIsBusy] = useState(false);
 
@@ -284,9 +288,9 @@ export function SetupConsole({ memberships = [] }: Props) {
   }, [games, scheduleSearch, scheduleSideFilter, scheduleStatusFilter]);
 
   useEffect(() => {
-    if (memberships.length > 0) {
-      setAvailableMemberships(memberships);
-      setOrganizationId((current) => current || memberships[0]?.organizationId || "");
+    if (providedMemberships.length > 0) {
+      setAvailableMemberships(providedMemberships);
+      setOrganizationId((current) => current || providedMemberships[0]?.organizationId || "");
       return;
     }
 
@@ -299,25 +303,34 @@ export function SetupConsole({ memberships = [] }: Props) {
         );
       })
       .catch((error) => setStatusText(messageFromError(error, "Unable to load setup access.")));
-  }, [memberships]);
+  }, [providedMemberships]);
 
   useEffect(() => {
     if (!organizationId) return;
 
     void (async () => {
       setStatusText("Loading teams, opponents, and venues...");
-      const [teamsResponse, opponentsResponse, venuesResponse] = await Promise.all([
+      const [teamsResult, opponentsResult, venuesResult] = await Promise.allSettled([
         readJson<{ items: Team[] }>(`/api/v1/teams?organizationId=${organizationId}`),
         readJson<{ items: Opponent[] }>(`/api/v1/opponents?organizationId=${organizationId}`),
         readJson<{ items: Venue[] }>(`/api/v1/venues?organizationId=${organizationId}`)
       ]);
+
+      const teamsResponse = teamsResult.status === "fulfilled" ? teamsResult.value : { items: [] };
+      const opponentsResponse = opponentsResult.status === "fulfilled" ? opponentsResult.value : { items: [] };
+      const venuesResponse = venuesResult.status === "fulfilled" ? venuesResult.value : { items: [] };
 
       const nextTeams = sortByName(teamsResponse.items);
       setTeams(nextTeams);
       setOpponents(sortByName(opponentsResponse.items));
       setVenues(sortByName(venuesResponse.items));
       setSelectedTeamId((current) => preferredSelection(nextTeams, current));
-      setStatusText("Setup data loaded.");
+
+      const failures = [teamsResult, opponentsResult, venuesResult]
+        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+        .map((result) => messageFromError(result.reason, "Request failed."));
+
+      setStatusText(failures.length > 0 ? failures[0] : "Setup data loaded.");
     })().catch((error) => setStatusText(messageFromError(error, "Unable to load setup data.")));
   }, [organizationId]);
 
@@ -407,7 +420,10 @@ export function SetupConsole({ memberships = [] }: Props) {
   }
 
   async function saveTeam() {
-    if (!organizationId) return;
+    if (!organizationId) {
+      setStatusText("Choose an organization before creating a team.");
+      return;
+    }
     setIsBusy(true);
     setStatusText(editingTeamId ? "Updating team..." : "Creating team...");
 
@@ -436,7 +452,10 @@ export function SetupConsole({ memberships = [] }: Props) {
   }
 
   async function saveSeason() {
-    if (!selectedTeamId) return;
+    if (!selectedTeamId) {
+      setStatusText("Choose a team before creating a season.");
+      return;
+    }
     setIsBusy(true);
     setStatusText(editingSeasonId ? "Updating season..." : "Creating season...");
 
@@ -466,7 +485,10 @@ export function SetupConsole({ memberships = [] }: Props) {
   }
 
   async function saveOpponent() {
-    if (!organizationId) return;
+    if (!organizationId) {
+      setStatusText("Choose an organization before creating an opponent.");
+      return;
+    }
     setIsBusy(true);
     setStatusText(editingOpponentId ? "Updating opponent..." : "Creating opponent...");
 
@@ -495,7 +517,14 @@ export function SetupConsole({ memberships = [] }: Props) {
   }
 
   async function saveVenue() {
-    if (!organizationId || !venueForm.name.trim()) return;
+    if (!organizationId) {
+      setStatusText("Choose an organization before creating a venue.");
+      return;
+    }
+    if (!venueForm.name.trim()) {
+      setStatusText("Enter a venue name before saving.");
+      return;
+    }
     setIsBusy(true);
     setStatusText(editingVenueId ? "Updating venue..." : "Creating venue...");
 
@@ -902,6 +931,7 @@ export function SetupConsole({ memberships = [] }: Props) {
             <label className="field">
               <span>Organization</span>
               <select value={organizationId} onChange={(event) => setOrganizationId(event.target.value)}>
+                {availableMemberships.length === 0 ? <option value="">No organizations found</option> : null}
                 {availableMemberships.map((membership) => (
                   <option key={membership.organizationId} value={membership.organizationId}>
                     {membership.organizationName} ({membership.role})
@@ -932,7 +962,7 @@ export function SetupConsole({ memberships = [] }: Props) {
             </label>
           </div>
           <div className="timeline-actions">
-            <button className="button-primary" disabled={isBusy || !teamForm.name.trim()} type="button" onClick={() => void saveTeam()}>
+            <button className="button-primary" disabled={isBusy || !organizationId || !teamForm.name.trim()} type="button" onClick={() => void saveTeam()}>
               {editingTeamId ? "Save team" : "Create team"}
             </button>
             {editingTeamId ? <button className="mini-button" type="button" onClick={resetTeamForm}>Cancel</button> : null}
@@ -984,7 +1014,7 @@ export function SetupConsole({ memberships = [] }: Props) {
             </label>
           </div>
           <div className="timeline-actions">
-            <button className="button-primary" disabled={isBusy || !opponentForm.schoolName.trim()} type="button" onClick={() => void saveOpponent()}>
+            <button className="button-primary" disabled={isBusy || !organizationId || !opponentForm.schoolName.trim()} type="button" onClick={() => void saveOpponent()}>
               {editingOpponentId ? "Save opponent" : "Create opponent"}
             </button>
             {editingOpponentId ? <button className="mini-button" type="button" onClick={resetOpponentForm}>Cancel</button> : null}
@@ -1233,7 +1263,7 @@ export function SetupConsole({ memberships = [] }: Props) {
             </label>
           </div>
           <div className="timeline-actions">
-            <button className="mini-button" disabled={isBusy || !venueForm.name.trim()} type="button" onClick={() => void saveVenue()}>
+            <button className="mini-button" disabled={isBusy || !organizationId || !venueForm.name.trim()} type="button" onClick={() => void saveVenue()}>
               {editingVenueId ? "Save venue" : "Create venue"}
             </button>
             {editingVenueId ? (
