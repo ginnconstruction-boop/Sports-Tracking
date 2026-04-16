@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { PlayReviewPanel } from "@/components/game-day/play-review-panel";
 import type { GameAdminRecord } from "@/lib/domain/game-admin";
@@ -185,9 +186,9 @@ export function GameReviewWorkspace({ gameId, initialSnapshot, record }: Props) 
                     <button className="mini-button" type="button" onClick={() => setSelectedPlayId(play.playId)}>
                       Review
                     </button>
-                    <a className="mini-button" href={`/games/${gameId}/gameday`}>
+                    <Link className="mini-button" href={`/games/${gameId}/gameday`}>
                       Open in Game Day
-                    </a>
+                    </Link>
                   </div>
                 </div>
               );
@@ -205,4 +206,3 @@ export function GameReviewWorkspace({ gameId, initialSnapshot, record }: Props) 
     </section>
   );
 }
-

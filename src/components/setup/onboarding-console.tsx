@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { gameStatusValues } from "@/lib/contracts/admin";
 import { RosterImportPanel } from "@/components/setup/roster-import-panel";
@@ -334,12 +335,12 @@ export function OnboardingConsole() {
           <h2 style={{ margin: 0 }}>4. Schedule first game</h2>
           {game ? (
             <div className="timeline-actions">
-              <a className="mini-button" href={`/games/${game.id}/manage`}>
+              <Link className="mini-button" href={`/games/${game.id}/manage`}>
                 Open game admin
-              </a>
-              <a className="mini-button" href={`/games/${game.id}/gameday`}>
+              </Link>
+              <Link className="mini-button" href={`/games/${game.id}/gameday`}>
                 Open Game Day
-              </a>
+              </Link>
             </div>
           ) : null}
         </div>

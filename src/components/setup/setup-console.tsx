@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { BrandingPanel } from "@/components/setup/branding-panel";
 import { gameStatusValues } from "@/lib/contracts/admin";
@@ -109,7 +110,7 @@ type RosterForm = {
 };
 
 type Props = {
-  memberships: OrganizationMembership[];
+  memberships?: OrganizationMembership[];
 };
 
 const emptyRosterForm: RosterForm = {
@@ -214,12 +215,13 @@ function toDateTimeLocalValue(value?: string | null) {
   return local.toISOString().slice(0, 16);
 }
 
-export function SetupConsole({ memberships }: Props) {
+export function SetupConsole({ memberships = [] }: Props) {
   const showBranding = isFeatureEnabled("organization_branding");
   const showTeamManagement = isFeatureEnabled("team_management");
   const showSeasonManagement = isFeatureEnabled("season_management");
   const showOpponentManagement = isFeatureEnabled("opponent_management");
   const showRosterImport = isFeatureEnabled("roster_import_csv");
+  const [availableMemberships, setAvailableMemberships] = useState<OrganizationMembership[]>(memberships);
   const [organizationId, setOrganizationId] = useState(memberships[0]?.organizationId ?? "");
   const [teams, setTeams] = useState<Team[]>([]);
   const [seasons, setSeasons] = useState<Season[]>([]);
@@ -252,7 +254,9 @@ export function SetupConsole({ memberships }: Props) {
   const [scheduleSearch, setScheduleSearch] = useState("");
   const [scheduleStatusFilter, setScheduleStatusFilter] = useState<"all" | GameForm["status"]>("all");
   const [scheduleSideFilter, setScheduleSideFilter] = useState<"all" | GameForm["homeAway"]>("all");
-  const [statusText, setStatusText] = useState("Choose an organization to manage.");
+  const [statusText, setStatusText] = useState(
+    memberships.length > 0 ? "Choose an organization to manage." : "Loading setup..."
+  );
   const [isBusy, setIsBusy] = useState(false);
 
   const selectedTeam = useMemo(() => teams.find((item) => item.id === selectedTeamId) ?? null, [teams, selectedTeamId]);
@@ -278,6 +282,24 @@ export function SetupConsole({ memberships }: Props) {
       return matchesSearch && matchesStatus && matchesSide;
     });
   }, [games, scheduleSearch, scheduleSideFilter, scheduleStatusFilter]);
+
+  useEffect(() => {
+    if (memberships.length > 0) {
+      setAvailableMemberships(memberships);
+      setOrganizationId((current) => current || memberships[0]?.organizationId || "");
+      return;
+    }
+
+    void readJson<{ memberships: OrganizationMembership[] }>("/api/v1/me")
+      .then((body) => {
+        setAvailableMemberships(body.memberships);
+        setOrganizationId(body.memberships[0]?.organizationId ?? "");
+        setStatusText(
+          body.memberships.length > 0 ? "Choose an organization to manage." : "No organization memberships found yet."
+        );
+      })
+      .catch((error) => setStatusText(messageFromError(error, "Unable to load setup access.")));
+  }, [memberships]);
 
   useEffect(() => {
     if (!organizationId) return;
@@ -880,7 +902,7 @@ export function SetupConsole({ memberships }: Props) {
             <label className="field">
               <span>Organization</span>
               <select value={organizationId} onChange={(event) => setOrganizationId(event.target.value)}>
-                {memberships.map((membership) => (
+                {availableMemberships.map((membership) => (
                   <option key={membership.organizationId} value={membership.organizationId}>
                     {membership.organizationName} ({membership.role})
                   </option>
@@ -1340,15 +1362,15 @@ export function SetupConsole({ memberships }: Props) {
                   <button className="mini-button danger-button" type="button" onClick={() => void deleteGame(item)}>
                     Delete
                   </button>
-                  <a className="mini-button" href={`/games/${item.game.id}/manage`}>
+                  <Link className="mini-button" href={`/games/${item.game.id}/manage`}>
                     Game admin
-                  </a>
-                  <a className="mini-button" href={`/games/${item.game.id}/gameday`}>
+                  </Link>
+                  <Link className="mini-button" href={`/games/${item.game.id}/gameday`}>
                     Open Game Day
-                  </a>
-                  <a className="mini-button" href={`/games/${item.game.id}/reports`}>
+                  </Link>
+                  <Link className="mini-button" href={`/games/${item.game.id}/reports`}>
                     Open reports
-                  </a>
+                  </Link>
                 </div>
               </div>
             ))}

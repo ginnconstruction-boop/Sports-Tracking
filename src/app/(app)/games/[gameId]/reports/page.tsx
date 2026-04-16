@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { AppShell } from "@/components/chrome/app-shell";
 import { GameContextHeader } from "@/components/games/game-context-header";
 import { ReportExportPanel } from "@/components/reports/report-export-panel";
@@ -206,14 +207,14 @@ export default async function ReportsPage({ params }: PageProps) {
             <ReportExportPanel gameId={gameId} initialExports={exports} />
             <div className="timeline-actions">
               {showAnalytics ? (
-                <a className="mini-button" href="/analytics">
+                <Link className="mini-button" href="/analytics">
                   Open analytics
-                </a>
+                </Link>
               ) : null}
               {showInternalReview ? (
-                <a className="mini-button" href={`/games/${gameId}/review`}>
+                <Link className="mini-button" href={`/games/${gameId}/review`}>
                   Open review workspace
-                </a>
+                </Link>
               ) : null}
               {showPublic && record.game.publicReportsEnabled ? (
                 <a className="mini-button" href={`/public/reports/${record.game.publicShareToken}`} target="_blank">

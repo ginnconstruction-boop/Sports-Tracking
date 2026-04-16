@@ -49,7 +49,7 @@ export default function HomePage() {
             <Link className="button-primary" href="/onboarding">
               Start onboarding
             </Link>
-            <Link className="button-secondary-dark" href="/setup">
+            <Link className="button-secondary-light" href="/setup">
               Open setup
             </Link>
             {showDebugTools ? <SampleSeedButton /> : null}

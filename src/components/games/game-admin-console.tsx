@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { gameStatusValues } from "@/lib/contracts/admin";
 import { isFeatureEnabled } from "@/lib/features/runtime";
@@ -270,8 +271,8 @@ export function GameAdminConsole({ record, opponents, venues }: Props) {
           <div className="entry-header">
             <h2 style={{ margin: 0 }}>Edit game details</h2>
             <div className="timeline-actions">
-              <a className="mini-button" href={`/games/${adminRecord.game.id}/gameday`}>Open Game Day</a>
-              <a className="mini-button" href={`/games/${adminRecord.game.id}/reports`}>Open reports</a>
+              <Link className="mini-button" href={`/games/${adminRecord.game.id}/gameday`}>Open Game Day</Link>
+              <Link className="mini-button" href={`/games/${adminRecord.game.id}/reports`}>Open reports</Link>
             </div>
           </div>
 

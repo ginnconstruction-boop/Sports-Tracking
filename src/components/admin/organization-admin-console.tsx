@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { OrganizationDiagnostics } from "@/lib/domain/organization-admin";
 
@@ -137,9 +138,9 @@ export function OrganizationAdminConsole({ memberships }: Props) {
             <section className="section-card pad-lg stack-md">
               <h2 style={{ margin: 0 }}>Runbook links</h2>
               <div className="timeline-actions">
-                <a className="mini-button" href="/onboarding">Open onboarding</a>
-                <a className="mini-button" href="/setup">Open setup</a>
-                <a className="mini-button" href="/analytics">Open analytics</a>
+                <Link className="mini-button" href="/onboarding">Open onboarding</Link>
+                <Link className="mini-button" href="/setup">Open setup</Link>
+                <Link className="mini-button" href="/analytics">Open analytics</Link>
               </div>
               <div className="kicker">
                 Use this page as the organization-level readiness view before beta rollout or staff onboarding.
@@ -151,4 +152,3 @@ export function OrganizationAdminConsole({ memberships }: Props) {
     </section>
   );
 }
-

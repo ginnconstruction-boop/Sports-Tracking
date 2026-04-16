@@ -1,17 +1,17 @@
 :root {
-  --bg: #f2eadc;
-  --surface: #fbf7ef;
-  --surface-strong: #13221b;
-  --surface-muted: #e2d7c1;
+  --bg: #f5f5f4;
+  --surface: #ffffff;
+  --surface-strong: #0f1f17;
+  --surface-muted: #e7e5e4;
   --surface-panel: rgba(20, 36, 29, 0.92);
-  --text: #18231e;
+  --text: #0c0a09;
   --text-inverse: #f8f3e8;
-  --text-muted: #5f675e;
-  --line: rgba(24, 35, 30, 0.12);
-  --accent: #d18d1f;
-  --accent-soft: rgba(209, 141, 31, 0.16);
-  --success: #2e7d57;
-  --danger: #b64f2e;
+  --text-muted: #57534e;
+  --line: rgba(12, 10, 9, 0.14);
+  --accent: #c47d0e;
+  --accent-soft: rgba(196, 125, 14, 0.14);
+  --success: #166534;
+  --danger: #991b1b;
   --shadow: 0 22px 60px rgba(14, 22, 18, 0.15);
   --radius-lg: 28px;
   --radius-md: 18px;
@@ -35,10 +35,12 @@ body {
   margin: 0;
   min-height: 100vh;
   background:
-    radial-gradient(circle at top right, rgba(209, 141, 31, 0.2), transparent 28%),
-    linear-gradient(180deg, #f8f1e4 0%, #f0e6d4 48%, #ebdfca 100%);
+    radial-gradient(circle at top right, rgba(196, 125, 14, 0.12), transparent 28%),
+    linear-gradient(180deg, #fafaf9 0%, #f5f5f4 52%, #ece7e1 100%);
   color: var(--text);
   font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
 }
 
 a {
@@ -88,7 +90,7 @@ textarea {
   padding: 8px 12px;
   border-radius: 999px;
   font-size: 0.78rem;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   background: rgba(255, 255, 255, 0.08);
   color: rgba(248, 243, 232, 0.82);
@@ -122,22 +124,22 @@ textarea {
 
 .section-grid {
   display: grid;
-  gap: 20px;
+  gap: 24px;
 }
 
 .section-card {
   border-radius: 28px;
-  background: rgba(251, 247, 239, 0.86);
+  background: rgba(255, 255, 255, 0.92);
   border: 1px solid var(--line);
   box-shadow: 0 14px 36px rgba(21, 31, 26, 0.08);
 }
 
 .section-card.pad-lg {
-  padding: 28px;
+  padding: 32px;
 }
 
 .section-card.pad-md {
-  padding: 22px;
+  padding: 24px;
 }
 
 .kicker {
@@ -173,11 +175,16 @@ textarea {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 50px;
+  min-height: 56px;
   padding: 0 18px;
   border-radius: 999px;
   border: 1px solid transparent;
   font-weight: 700;
+  font-size: 1rem;
+  transition:
+    transform 120ms ease,
+    filter 120ms ease,
+    background 120ms ease;
 }
 
 .button-primary {
@@ -195,6 +202,37 @@ textarea {
   border-color: rgba(248, 243, 232, 0.24);
   background: rgba(255, 255, 255, 0.08);
   color: var(--text-inverse);
+}
+
+.button-secondary-light {
+  min-height: 48px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(24, 35, 30, 0.18);
+  background: rgba(24, 35, 30, 0.06);
+  color: #18231e;
+  transition:
+    transform 120ms ease,
+    filter 120ms ease,
+    background 120ms ease;
+}
+
+.button-primary:hover {
+  filter: brightness(1.1);
+}
+
+.button-primary:active {
+  transform: scale(0.97);
+}
+
+.button-secondary:hover,
+.button-secondary-light:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.button-secondary:active,
+.button-secondary-light:active {
+  transform: scale(0.97);
 }
 
 .button-primary-small {
@@ -228,7 +266,12 @@ textarea {
 }
 
 .stack-lg > * + * {
-  margin-top: 24px;
+  margin-top: 32px;
+}
+
+h2 {
+  margin: 0 0 4px;
+  font-size: clamp(1.4rem, 2.5vw, 2rem);
 }
 
 .table-like {
@@ -283,7 +326,7 @@ textarea {
 
 .score-box strong {
   display: block;
-  font-size: clamp(1.8rem, 3vw, 2.5rem);
+  font-size: clamp(2.4rem, 4vw, 3.5rem);
 }
 
 .command-grid {
@@ -293,7 +336,7 @@ textarea {
 }
 
 .command-button {
-  min-height: 92px;
+  min-height: 100px;
   padding: 16px;
   border-radius: 20px;
   border: 1px solid rgba(248, 243, 232, 0.08);
@@ -304,7 +347,7 @@ textarea {
 
 .command-button strong {
   display: block;
-  font-size: 1rem;
+  font-size: 1.05rem;
   margin-bottom: 8px;
 }
 
@@ -317,6 +360,10 @@ textarea {
   display: grid;
   gap: 18px;
   grid-template-columns: 1fr 1fr;
+}
+
+.split-panel-balanced {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .list-panel {
@@ -339,6 +386,23 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.session-details {
+  border-radius: 20px;
+  border: 1px solid rgba(248, 243, 232, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 14px 16px;
+}
+
+.session-summary {
+  cursor: pointer;
+  font-weight: 700;
+  list-style: none;
+}
+
+.session-summary::-webkit-details-marker {
+  display: none;
 }
 
 .status-pill {
@@ -385,8 +449,8 @@ textarea {
 
 .form-grid {
   display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .field,
@@ -404,8 +468,8 @@ textarea {
 .field input,
 .field select,
 .field textarea {
-  min-height: 52px;
-  padding: 0 14px;
+  min-height: 56px;
+  padding: 0 16px;
   border-radius: 14px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.78);
@@ -537,12 +601,23 @@ textarea {
 
 .mini-button,
 .button-secondary-light {
-  min-height: 40px;
+  min-height: 48px;
   padding: 0 14px;
   border-radius: 999px;
   border: 1px solid var(--line);
   background: rgba(24, 35, 30, 0.05);
   color: var(--text);
+  transition:
+    transform 120ms ease,
+    background 120ms ease;
+}
+
+.mini-button:hover {
+  background: rgba(24, 35, 30, 0.1);
+}
+
+.mini-button:active {
+  transform: scale(0.97);
 }
 
 .danger-button {
@@ -634,7 +709,7 @@ textarea {
   }
 
   .form-grid {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
   }
 
   .participant-field-grid {

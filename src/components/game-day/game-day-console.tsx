@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import type { GameDaySnapshot } from "@/lib/domain/game-day";
 import type { PlayRecord } from "@/lib/domain/play-log";
@@ -881,6 +882,18 @@ export function GameDayConsole({ gameId, initialSnapshot }: GameDayConsoleProps)
             </div>
           </div>
 
+        </div>
+
+        <div className="board-body stack-lg">
+          <PlayEntryPanel
+            snapshot={snapshot}
+            intent={intent}
+            disabled={!canWrite}
+            submitting={isPending}
+            compactMode={compactMode}
+            onSubmit={submitPlay}
+            onCancelIntent={() => setIntent({ kind: "append" })}
+          />
           <div className="status-strip">
             <span className="status-pill strong">{writerLabel}</span>
             <span className="status-pill">{offlineLabel}</span>
@@ -902,129 +915,96 @@ export function GameDayConsole({ gameId, initialSnapshot }: GameDayConsoleProps)
             ) : null}
           </div>
 
-          <div className="metric-grid">
-            <div className="metric-card">
-              <div className="metric-label">Down & distance</div>
-              <div className="metric-value">
-                {state.down}&amp;{state.distance}
+          <details className="session-details">
+            <summary className="session-summary">Session &amp; drive info</summary>
+            <div className="stack-md" style={{ marginTop: 14 }}>
+              <div className="split-panel split-panel-balanced">
+                <div className="list-panel">
+                  <h3 style={{ marginTop: 0 }}>Session</h3>
+                  <div className="stack-sm">
+                    <div className="mono">{statusText}</div>
+                    {session?.writerLeaseExpiresAt ? (
+                      <div className="mono">Lease until {new Date(session.writerLeaseExpiresAt).toLocaleTimeString()}</div>
+                    ) : null}
+                    {snapshot.lastRebuiltAt ? (
+                      <div className="mono">Last rebuild {new Date(snapshot.lastRebuiltAt).toLocaleTimeString()}</div>
+                    ) : null}
+                    {errorText ? <div className="error-note">{errorText}</div> : null}
+                    <div className="timeline-actions">
+                      <button className="mini-button" disabled={busyAction !== null} type="button" onClick={() => setCompactMode((current) => !current)}>
+                        {compactMode ? "Standard mode" : "Ultra-fast mode"}
+                      </button>
+                      {showInternalReview ? (
+                        <button className="mini-button" type="button" onClick={() => setCorrectionMode((current) => !current)}>
+                          {correctionMode ? "Hide correction" : "Correction queue"}
+                        </button>
+                      ) : null}
+                      <button className="mini-button" disabled={busyAction !== null || !deviceKey} type="button" onClick={() => void refreshLiveSnapshot()}>
+                        {busyAction === "refresh" ? "Refreshing..." : "Refresh live"}
+                      </button>
+                      <button className="mini-button" disabled={busyAction !== null || !deviceKey || pendingMutations === 0} type="button" onClick={() => void flushOutbox(deviceKey)}>
+                        Retry sync
+                      </button>
+                      {session?.isActiveWriter ? (
+                        <button className="mini-button" disabled={busyAction !== null} type="button" onClick={() => void releaseWriterLease()}>
+                          Release writer
+                        </button>
+                      ) : null}
+                      {!session?.isActiveWriter ? (
+                        <button className="mini-button" disabled={busyAction !== null || !deviceKey} type="button" onClick={() => void reacquireWriterLease()}>
+                          {busyAction === "lease" ? "Trying..." : "Try writer lease"}
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+                <div className="list-panel">
+                  <h3 style={{ marginTop: 0 }}>Quarter summary</h3>
+                  <div className="table-like compact">
+                    {snapshot.quarterSummary.map((item) => (
+                      <div className="table-row compact" key={item.quarter}>
+                        <span className="mono">Q{item.quarter}</span>
+                        <span>{item.playCount} plays</span>
+                        <span className="mono">
+                          {item.awayPoints}-{item.homePoints}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
-            </div>
-            <div className="metric-card">
-              <div className="metric-label">Ball position</div>
-              <div className="metric-value">
-                {state.ballOn.side === "home" ? "Own" : "Opp"} {state.ballOn.yardLine}
-              </div>
-            </div>
-            <div className="metric-card">
-              <div className="metric-label">Possession</div>
-              <div className="metric-value">
-                {state.possession === "home" ? snapshot.homeTeam : snapshot.awayTeam}
-              </div>
-            </div>
-            <div className="metric-card">
-              <div className="metric-label">Clock / phase</div>
-              <div className="metric-value">
-                {formatClock(state.clockSeconds)} {state.phase}
-              </div>
-            </div>
-          </div>
 
-          <div className="split-panel">
-            <div className="list-panel">
-              <h3 style={{ marginTop: 0 }}>Session</h3>
-              <div className="stack-sm">
-                <div className="mono">{statusText}</div>
-                {session?.writerLeaseExpiresAt ? (
-                  <div className="mono">Lease until {new Date(session.writerLeaseExpiresAt).toLocaleTimeString()}</div>
-                ) : null}
-                {snapshot.lastRebuiltAt ? (
-                  <div className="mono">Last rebuild {new Date(snapshot.lastRebuiltAt).toLocaleTimeString()}</div>
-                ) : null}
-                {errorText ? <div className="error-note">{errorText}</div> : null}
-                <div className="timeline-actions">
-                  <button className="mini-button" disabled={busyAction !== null} type="button" onClick={() => setCompactMode((current) => !current)}>
-                    {compactMode ? "Standard mode" : "Ultra-fast mode"}
-                  </button>
-                  {showInternalReview ? (
-                    <button className="mini-button" type="button" onClick={() => setCorrectionMode((current) => !current)}>
-                      {correctionMode ? "Hide correction" : "Correction queue"}
-                    </button>
-                  ) : null}
-                  <button className="mini-button" disabled={busyAction !== null || !deviceKey} type="button" onClick={() => void refreshLiveSnapshot()}>
-                    {busyAction === "refresh" ? "Refreshing..." : "Refresh live"}
-                  </button>
-                  <button className="mini-button" disabled={busyAction !== null || !deviceKey || pendingMutations === 0} type="button" onClick={() => void flushOutbox(deviceKey)}>
-                    Retry sync
-                  </button>
-                  {session?.isActiveWriter ? (
-                    <button className="mini-button" disabled={busyAction !== null} type="button" onClick={() => void releaseWriterLease()}>
-                      Release writer
-                    </button>
-                  ) : null}
-                  {!session?.isActiveWriter ? (
-                    <button className="mini-button" disabled={busyAction !== null || !deviceKey} type="button" onClick={() => void reacquireWriterLease()}>
-                      {busyAction === "lease" ? "Trying..." : "Try writer lease"}
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-            <div className="list-panel">
-              <h3 style={{ marginTop: 0 }}>Quarter summary</h3>
-              <div className="table-like compact">
-                {snapshot.quarterSummary.map((item) => (
-                  <div className="table-row compact" key={item.quarter}>
-                    <span className="mono">Q{item.quarter}</span>
-                    <span>{item.playCount} plays</span>
-                    <span className="mono">
-                      {item.awayPoints}-{item.homePoints}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="list-panel">
-              <div className="entry-header" style={{ marginBottom: 10 }}>
-                <h3 style={{ margin: 0 }}>Current drive</h3>
-                <div className="timeline-actions">
-                  <a className="mini-button" href={`/games/${gameId}/manage`}>
-                    Game admin
-                  </a>
-                  {showInternalReview ? (
-                    <a className="mini-button" href={`/games/${gameId}/review`}>
-                      Review workspace
-                    </a>
-                  ) : null}
-                </div>
-              </div>
-              {currentDrive ? (
-                <div className="stack-sm">
-                  <div className="mono">
-                    {currentDrive.side === "home" ? snapshot.homeTeam : snapshot.awayTeam} from {currentDrive.startFieldPosition}
-                  </div>
-                  <div className="pill-row">
-                    <span className="chip">{currentDrive.playCount} plays</span>
-                    <span className="chip">{currentDrive.yardsGained} yards</span>
-                    <span className="chip">{driveResultLabel(currentDrive.result)}</span>
+              <div className="list-panel">
+                <div className="entry-header" style={{ marginBottom: 10 }}>
+                  <h3 style={{ margin: 0 }}>Current drive</h3>
+                  <div className="timeline-actions">
+                    <Link className="mini-button" href={`/games/${gameId}/manage`}>
+                      Game admin
+                    </Link>
+                    {showInternalReview ? (
+                      <Link className="mini-button" href={`/games/${gameId}/review`}>
+                        Review workspace
+                      </Link>
+                    ) : null}
                   </div>
                 </div>
-              ) : (
-                <div className="kicker">Drive summary will appear once live plays are entered.</div>
-              )}
+                {currentDrive ? (
+                  <div className="stack-sm">
+                    <div className="mono">
+                      {currentDrive.side === "home" ? snapshot.homeTeam : snapshot.awayTeam} from {currentDrive.startFieldPosition}
+                    </div>
+                    <div className="pill-row">
+                      <span className="chip">{currentDrive.playCount} plays</span>
+                      <span className="chip">{currentDrive.yardsGained} yards</span>
+                      <span className="chip">{driveResultLabel(currentDrive.result)}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="kicker">Drive summary will appear once live plays are entered.</div>
+                )}
+              </div>
             </div>
-          </div>
-        </div>
-
-        <div className="board-body stack-lg">
-          <PlayEntryPanel
-            snapshot={snapshot}
-            intent={intent}
-            disabled={!canWrite}
-            submitting={isPending}
-            compactMode={compactMode}
-            onSubmit={submitPlay}
-            onCancelIntent={() => setIntent({ kind: "append" })}
-          />
+          </details>
         </div>
       </div>
 

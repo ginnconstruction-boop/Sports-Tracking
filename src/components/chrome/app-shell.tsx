@@ -6,7 +6,7 @@ type AppShellProps = {
   title: string;
   subtitle: string;
   children: React.ReactNode;
-  current?: "home" | "onboarding" | "setup" | "analytics" | "admin" | "gameday" | "reports" | "manage" | "review";
+  current?: "home" | "games" | "onboarding" | "setup" | "analytics" | "admin" | "gameday" | "reports" | "manage" | "review";
   gameId?: string;
 };
 
@@ -18,6 +18,7 @@ export function AppShell({ title, subtitle, children, current, gameId }: AppShel
   const showReview = isFeatureEnabled("internal_debug_tools");
   const nav = [
     { href: "/", label: "Operations", key: "home" },
+    { href: "/games", label: "Games", key: "games" },
     { href: "/onboarding", label: "Onboarding", key: "onboarding" },
     { href: "/setup", label: "Setup", key: "setup" },
     ...(showAnalytics ? [{ href: "/analytics", label: "Analytics", key: "analytics" as const }] : []),
