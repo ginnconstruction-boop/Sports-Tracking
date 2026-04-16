@@ -5,6 +5,51 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getDb } from "@/server/db/client";
 import { appUsers, organizationMemberships, organizations } from "@/server/db/schema";
 
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+}
+
+async function ensureStarterOrganizationMembership(user: { id: string; email: string; displayName: string }) {
+  const db = getDb();
+  const baseName = user.displayName.trim() || user.email.split("@")[0] || "Tracking the Game";
+  const organizationName = `${baseName} Program`;
+  const slugBase = slugify(baseName) || "tracking-the-game";
+  const slug = `${slugBase}-${user.id.slice(0, 8)}`.slice(0, 80);
+
+  const existingOrganization =
+    (await db.query.organizations.findFirst({
+      where: eq(organizations.slug, slug)
+    })) ??
+    (
+      await db
+        .insert(organizations)
+        .values({
+          name: organizationName,
+          slug
+        })
+        .returning()
+    )[0];
+
+  const existingMembership = await db.query.organizationMemberships.findFirst({
+    where: and(
+      eq(organizationMemberships.organizationId, existingOrganization.id),
+      eq(organizationMemberships.userId, user.id)
+    )
+  });
+
+  if (!existingMembership) {
+    await db.insert(organizationMemberships).values({
+      organizationId: existingOrganization.id,
+      userId: user.id,
+      role: "admin"
+    });
+  }
+}
+
 export async function requireAuthenticatedUser() {
   const supabase = await createSupabaseServerClient();
   const {
@@ -75,16 +120,24 @@ export async function getCurrentUserMemberships() {
   const user = await requireAuthenticatedUser();
   const db = getDb();
 
-  const memberships = await db
-    .select({
-      organizationId: organizationMemberships.organizationId,
-      role: organizationMemberships.role,
-      organizationName: organizations.name,
-      organizationSlug: organizations.slug
-    })
-    .from(organizationMemberships)
-    .innerJoin(organizations, eq(organizationMemberships.organizationId, organizations.id))
-    .where(eq(organizationMemberships.userId, user.id));
+  const loadMemberships = () =>
+    db
+      .select({
+        organizationId: organizationMemberships.organizationId,
+        role: organizationMemberships.role,
+        organizationName: organizations.name,
+        organizationSlug: organizations.slug
+      })
+      .from(organizationMemberships)
+      .innerJoin(organizations, eq(organizationMemberships.organizationId, organizations.id))
+      .where(eq(organizationMemberships.userId, user.id));
+
+  let memberships = await loadMemberships();
+
+  if (memberships.length === 0) {
+    await ensureStarterOrganizationMembership(user);
+    memberships = await loadMemberships();
+  }
 
   return {
     user,
