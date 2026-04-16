@@ -113,6 +113,10 @@ type Props = {
   memberships?: OrganizationMembership[];
 };
 
+type SetupStage = "team" | "season" | "details" | "schedule" | "roster";
+
+const EMPTY_MEMBERSHIPS: OrganizationMembership[] = [];
+
 const emptyRosterForm: RosterForm = {
   firstName: "",
   lastName: "",
@@ -219,7 +223,7 @@ function toDateTimeLocalValue(value?: string | null) {
 }
 
 export function SetupConsole({ memberships }: Props) {
-  const providedMemberships = memberships ?? [];
+  const providedMemberships = memberships ?? EMPTY_MEMBERSHIPS;
   const showBranding = isFeatureEnabled("organization_branding");
   const showTeamManagement = isFeatureEnabled("team_management");
   const showSeasonManagement = isFeatureEnabled("season_management");
@@ -258,6 +262,7 @@ export function SetupConsole({ memberships }: Props) {
   const [scheduleSearch, setScheduleSearch] = useState("");
   const [scheduleStatusFilter, setScheduleStatusFilter] = useState<"all" | GameForm["status"]>("all");
   const [scheduleSideFilter, setScheduleSideFilter] = useState<"all" | GameForm["homeAway"]>("all");
+  const [activeStep, setActiveStep] = useState<SetupStage>("team");
   const [statusText, setStatusText] = useState(
     providedMemberships.length > 0 ? "Choose an organization to manage." : "Loading setup..."
   );
@@ -270,6 +275,12 @@ export function SetupConsole({ memberships }: Props) {
     [opponents]
   );
   const availableVenues = useMemo(() => venues, [venues]);
+  const hasOrganization = Boolean(organizationId);
+  const hasTeams = teams.length > 0;
+  const hasSeasons = seasons.length > 0;
+  const hasOpponents = availableOpponents.length > 0;
+  const hasVenues = availableVenues.length > 0;
+  const hasGames = games.length > 0;
   const filteredGames = useMemo(() => {
     const search = scheduleSearch.trim().toLowerCase();
 
@@ -286,6 +297,32 @@ export function SetupConsole({ memberships }: Props) {
       return matchesSearch && matchesStatus && matchesSide;
     });
   }, [games, scheduleSearch, scheduleSideFilter, scheduleStatusFilter]);
+  const flowSteps = useMemo(
+    () => [
+      { key: "team" as const, label: "1. Team", enabled: hasOrganization, complete: hasTeams },
+      { key: "season" as const, label: "2. Season", enabled: hasTeams, complete: hasSeasons },
+      {
+        key: "details" as const,
+        label: "3. Opponent + venue",
+        enabled: hasSeasons,
+        complete: hasOpponents && hasVenues
+      },
+      {
+        key: "schedule" as const,
+        label: "4. Schedule",
+        enabled: hasSeasons && hasOpponents,
+        complete: hasGames
+      },
+      {
+        key: "roster" as const,
+        label: "5. Roster",
+        enabled: hasSeasons,
+        complete: rosterDraft.length > 0
+      }
+    ],
+    [hasGames, hasOpponents, hasOrganization, hasSeasons, hasTeams, hasVenues, rosterDraft.length]
+  );
+  const activeStepMeta = flowSteps.find((step) => step.key === activeStep) ?? flowSteps[0];
 
   useEffect(() => {
     if (providedMemberships.length > 0) {
@@ -381,6 +418,34 @@ export function SetupConsole({ memberships }: Props) {
     })().catch((error) => setStatusText(messageFromError(error, "Unable to load roster.")));
   }, [selectedSeasonId, availableOpponents, availableVenues]);
 
+  useEffect(() => {
+    if (activeStep === "team" || activeStepMeta.enabled) {
+      return;
+    }
+
+    if (!hasOrganization) {
+      setActiveStep("team");
+      return;
+    }
+
+    if (!hasTeams) {
+      setActiveStep("team");
+      return;
+    }
+
+    if (!hasSeasons) {
+      setActiveStep("season");
+      return;
+    }
+
+    if (!hasOpponents || !hasVenues) {
+      setActiveStep("details");
+      return;
+    }
+
+    setActiveStep("schedule");
+  }, [activeStep, activeStepMeta.enabled, hasOpponents, hasOrganization, hasSeasons, hasTeams, hasVenues]);
+
   function resetTeamForm() {
     setEditingTeamId(null);
     setTeamForm({ name: "", level: "Varsity" });
@@ -444,6 +509,9 @@ export function SetupConsole({ memberships }: Props) {
       setSelectedTeamId(response.item.id);
       resetTeamForm();
       setStatusText("Team saved.");
+      if (!editingTeamId) {
+        setActiveStep("season");
+      }
     } catch (error) {
       setStatusText(messageFromError(error, "Unable to save team."));
     } finally {
@@ -477,6 +545,9 @@ export function SetupConsole({ memberships }: Props) {
       setSelectedSeasonId(response.item.id);
       resetSeasonForm();
       setStatusText("Season saved.");
+      if (!editingSeasonId) {
+        setActiveStep("details");
+      }
     } catch (error) {
       setStatusText(messageFromError(error, "Unable to save season."));
     } finally {
@@ -509,6 +580,9 @@ export function SetupConsole({ memberships }: Props) {
       );
       resetOpponentForm();
       setStatusText("Opponent saved.");
+      if (!editingOpponentId && venues.length > 0) {
+        setActiveStep("schedule");
+      }
     } catch (error) {
       setStatusText(messageFromError(error, "Unable to save opponent."));
     } finally {
@@ -559,6 +633,9 @@ export function SetupConsole({ memberships }: Props) {
       setGameForm((current) => ({ ...current, venueId: response.item.id }));
       resetVenueForm();
       setStatusText(editingVenueId ? "Venue updated." : "Venue saved.");
+      if (!editingVenueId && availableOpponents.length > 0) {
+        setActiveStep("schedule");
+      }
     } catch (error) {
       setStatusText(messageFromError(error, "Unable to save venue."));
     } finally {
@@ -618,6 +695,9 @@ export function SetupConsole({ memberships }: Props) {
       );
       resetGameForm();
       setStatusText(editingGameId ? "Game updated." : "Game scheduled.");
+      if (!editingGameId) {
+        setActiveStep("roster");
+      }
     } catch (error) {
       setStatusText(messageFromError(error, editingGameId ? "Unable to update game." : "Unable to create game."));
     } finally {
@@ -925,7 +1005,7 @@ export function SetupConsole({ memberships }: Props) {
         <div className="entry-header">
           <div>
             <h2 style={{ margin: 0 }}>Program setup</h2>
-            <p className="kicker">Create teams, define seasons, track opponents, and manage rosters from one product surface.</p>
+            <p className="kicker">Move through setup in order, then jump back to any unlocked step whenever you need.</p>
           </div>
           <div className="stack-sm" style={{ minWidth: 280 }}>
             <label className="field">
@@ -942,8 +1022,25 @@ export function SetupConsole({ memberships }: Props) {
             <span className="chip">{statusText}</span>
           </div>
         </div>
+        <div className="pill-row">
+          {flowSteps.map((step) => (
+            <button
+              key={step.key}
+              className={activeStep === step.key ? "button-primary" : "button-secondary-light"}
+              disabled={!step.enabled}
+              type="button"
+              onClick={() => setActiveStep(step.key)}
+            >
+              {step.complete ? `${step.label} done` : step.label}
+            </button>
+          ))}
+        </div>
+        <p className="kicker">
+          Current step: <strong>{activeStepMeta.label}</strong>. Team comes first, roster opens once a season exists, and you can revisit any unlocked step anytime.
+        </p>
       </section>
 
+      {activeStep === "team" ? (
       <section className="two-column">
         {showTeamManagement ? (
         <div className="section-card pad-lg stack-md">
@@ -992,60 +1089,10 @@ export function SetupConsole({ memberships }: Props) {
           </div>
         </div>
         ) : null}
-
-        {showOpponentManagement ? (
-        <div className="section-card pad-lg stack-md">
-          <div className="entry-header">
-            <h2 style={{ margin: 0 }}>Opponents</h2>
-            <span className="chip">{opponents.length} opponents</span>
-          </div>
-          <div className="form-grid">
-            <label className="field">
-              <span>School</span>
-              <input value={opponentForm.schoolName} onChange={(event) => setOpponentForm((current) => ({ ...current, schoolName: event.target.value }))} />
-            </label>
-            <label className="field">
-              <span>Mascot</span>
-              <input value={opponentForm.mascot} onChange={(event) => setOpponentForm((current) => ({ ...current, mascot: event.target.value }))} />
-            </label>
-            <label className="field">
-              <span>Short code</span>
-              <input value={opponentForm.shortCode} onChange={(event) => setOpponentForm((current) => ({ ...current, shortCode: event.target.value }))} />
-            </label>
-          </div>
-          <div className="timeline-actions">
-            <button className="button-primary" disabled={isBusy || !organizationId || !opponentForm.schoolName.trim()} type="button" onClick={() => void saveOpponent()}>
-              {editingOpponentId ? "Save opponent" : "Create opponent"}
-            </button>
-            {editingOpponentId ? <button className="mini-button" type="button" onClick={resetOpponentForm}>Cancel</button> : null}
-          </div>
-          <div className="table-like">
-            {opponents.map((opponent) => (
-              <div className="timeline-card" key={opponent.id}>
-                <div className="timeline-top">
-                  <strong>{opponent.schoolName}</strong>
-                  <span className="mono">{opponent.shortCode ?? "n/a"}</span>
-                </div>
-                <div className="pill-row">
-                  <span className="chip">{opponent.archivedAt ? "archived" : "active"}</span>
-                  <span className="chip">{opponent.mascot || "No mascot yet"}</span>
-                </div>
-                <div className="timeline-actions">
-                  <button className="mini-button" type="button" onClick={() => { setEditingOpponentId(opponent.id); setOpponentForm({ schoolName: opponent.schoolName, mascot: opponent.mascot ?? "", shortCode: opponent.shortCode ?? "" }); }}>
-                    Edit
-                  </button>
-                  <button className="mini-button" type="button" onClick={() => void toggleArchived("opponent", opponent, !opponent.archivedAt)}>
-                    {opponent.archivedAt ? "Restore" : "Archive"}
-                  </button>
-                  <button className="mini-button danger-button" type="button" onClick={() => void deleteItem("opponent", opponent)}>Delete</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-        ) : null}
       </section>
+      ) : null}
 
+      {activeStep === "season" ? (
       <section className="two-column">
         {showSeasonManagement ? (
         <div className="section-card pad-lg stack-md">
@@ -1115,7 +1162,117 @@ export function SetupConsole({ memberships }: Props) {
         </div>
         ) : null}
       </section>
+      ) : null}
 
+      {activeStep === "details" ? (
+      <section className="two-column">
+        {showOpponentManagement ? (
+        <div className="section-card pad-lg stack-md">
+          <div className="entry-header">
+            <h2 style={{ margin: 0 }}>Opponents</h2>
+            <span className="chip">{opponents.length} opponents</span>
+          </div>
+          <p className="kicker">Add the teams you plan to schedule against. Once you have at least one opponent and one venue, schedule opens up.</p>
+          <div className="form-grid">
+            <label className="field">
+              <span>School</span>
+              <input value={opponentForm.schoolName} onChange={(event) => setOpponentForm((current) => ({ ...current, schoolName: event.target.value }))} />
+            </label>
+            <label className="field">
+              <span>Mascot</span>
+              <input value={opponentForm.mascot} onChange={(event) => setOpponentForm((current) => ({ ...current, mascot: event.target.value }))} />
+            </label>
+            <label className="field">
+              <span>Short code</span>
+              <input value={opponentForm.shortCode} onChange={(event) => setOpponentForm((current) => ({ ...current, shortCode: event.target.value }))} />
+            </label>
+          </div>
+          <div className="timeline-actions">
+            <button className="button-primary" disabled={isBusy || !organizationId || !opponentForm.schoolName.trim()} type="button" onClick={() => void saveOpponent()}>
+              {editingOpponentId ? "Save opponent" : "Create opponent"}
+            </button>
+            {editingOpponentId ? <button className="mini-button" type="button" onClick={resetOpponentForm}>Cancel</button> : null}
+          </div>
+          <div className="table-like">
+            {opponents.map((opponent) => (
+              <div className="timeline-card" key={opponent.id}>
+                <div className="timeline-top">
+                  <strong>{opponent.schoolName}</strong>
+                  <span className="mono">{opponent.shortCode ?? "n/a"}</span>
+                </div>
+                <div className="pill-row">
+                  <span className="chip">{opponent.archivedAt ? "archived" : "active"}</span>
+                  <span className="chip">{opponent.mascot || "No mascot yet"}</span>
+                </div>
+                <div className="timeline-actions">
+                  <button className="mini-button" type="button" onClick={() => { setEditingOpponentId(opponent.id); setOpponentForm({ schoolName: opponent.schoolName, mascot: opponent.mascot ?? "", shortCode: opponent.shortCode ?? "" }); }}>
+                    Edit
+                  </button>
+                  <button className="mini-button" type="button" onClick={() => void toggleArchived("opponent", opponent, !opponent.archivedAt)}>
+                    {opponent.archivedAt ? "Restore" : "Archive"}
+                  </button>
+                  <button className="mini-button danger-button" type="button" onClick={() => void deleteItem("opponent", opponent)}>Delete</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        ) : null}
+
+        <div className="section-card pad-lg stack-md">
+          <div className="entry-header">
+            <h2 style={{ margin: 0 }}>Venues</h2>
+            <span className="chip">{venues.length} venues</span>
+          </div>
+          <p className="kicker">Create home fields and away locations once, then reuse them across every game on the schedule.</p>
+          <div className="form-grid">
+            <label className="field">
+              <span>Venue name</span>
+              <input value={venueForm.name} onChange={(event) => setVenueForm((current) => ({ ...current, name: event.target.value }))} />
+            </label>
+            <label className="field">
+              <span>City</span>
+              <input value={venueForm.city} onChange={(event) => setVenueForm((current) => ({ ...current, city: event.target.value }))} />
+            </label>
+            <label className="field">
+              <span>State</span>
+              <input value={venueForm.state} onChange={(event) => setVenueForm((current) => ({ ...current, state: event.target.value }))} />
+            </label>
+          </div>
+          <div className="timeline-actions">
+            <button className="mini-button" disabled={isBusy || !organizationId || !venueForm.name.trim()} type="button" onClick={() => void saveVenue()}>
+              {editingVenueId ? "Save venue" : "Create venue"}
+            </button>
+            {editingVenueId ? (
+              <button className="mini-button" type="button" onClick={resetVenueForm}>
+                Cancel
+              </button>
+            ) : null}
+          </div>
+          <div className="table-like">
+            {venues.length === 0 ? <div className="kicker">No venues saved yet.</div> : null}
+            {venues.map((venue) => (
+              <div className="timeline-card" key={venue.id}>
+                <div className="timeline-top">
+                  <strong>{venue.name}</strong>
+                  <span className="mono">{[venue.city, venue.state].filter(Boolean).join(", ") || "Location TBD"}</span>
+                </div>
+                <div className="timeline-actions">
+                  <button className="mini-button" type="button" onClick={() => editVenue(venue)}>
+                    Edit
+                  </button>
+                  <button className="mini-button danger-button" type="button" onClick={() => void deleteVenueItem(venue)}>
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+      ) : null}
+
+      {activeStep === "schedule" ? (
       <section className="two-column">
         <div className="section-card pad-lg stack-md">
           <div className="entry-header">
@@ -1240,57 +1397,6 @@ export function SetupConsole({ memberships }: Props) {
               </button>
             ) : null}
           </div>
-
-          <div className="entry-header" style={{ marginTop: 12 }}>
-            <div>
-              <h3 style={{ margin: 0 }}>Quick add venue</h3>
-              <p className="kicker">Create a location once, then reuse it across the season schedule.</p>
-            </div>
-            <span className="chip">{venues.length} venues</span>
-          </div>
-          <div className="form-grid">
-            <label className="field">
-              <span>Venue name</span>
-              <input value={venueForm.name} onChange={(event) => setVenueForm((current) => ({ ...current, name: event.target.value }))} />
-            </label>
-            <label className="field">
-              <span>City</span>
-              <input value={venueForm.city} onChange={(event) => setVenueForm((current) => ({ ...current, city: event.target.value }))} />
-            </label>
-            <label className="field">
-              <span>State</span>
-              <input value={venueForm.state} onChange={(event) => setVenueForm((current) => ({ ...current, state: event.target.value }))} />
-            </label>
-          </div>
-          <div className="timeline-actions">
-            <button className="mini-button" disabled={isBusy || !organizationId || !venueForm.name.trim()} type="button" onClick={() => void saveVenue()}>
-              {editingVenueId ? "Save venue" : "Create venue"}
-            </button>
-            {editingVenueId ? (
-              <button className="mini-button" type="button" onClick={resetVenueForm}>
-                Cancel
-              </button>
-            ) : null}
-          </div>
-          <div className="table-like">
-            {venues.length === 0 ? <div className="kicker">No venues saved yet.</div> : null}
-            {venues.map((venue) => (
-              <div className="timeline-card" key={venue.id}>
-                <div className="timeline-top">
-                  <strong>{venue.name}</strong>
-                  <span className="mono">{[venue.city, venue.state].filter(Boolean).join(", ") || "Location TBD"}</span>
-                </div>
-                <div className="timeline-actions">
-                  <button className="mini-button" type="button" onClick={() => editVenue(venue)}>
-                    Edit
-                  </button>
-                  <button className="mini-button danger-button" type="button" onClick={() => void deleteVenueItem(venue)}>
-                    Delete
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
         </div>
 
         <div className="section-card pad-lg stack-md">
@@ -1407,7 +1513,9 @@ export function SetupConsole({ memberships }: Props) {
           </div>
         </div>
       </section>
+      ) : null}
 
+      {activeStep === "roster" ? (
       <section className="two-column">
         <div className="section-card pad-lg stack-md">
           <div className="entry-header">
@@ -1465,6 +1573,7 @@ export function SetupConsole({ memberships }: Props) {
           </div>
         </div>
       </section>
+      ) : null}
     </section>
   );
 }
