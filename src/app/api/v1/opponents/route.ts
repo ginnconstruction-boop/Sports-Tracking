@@ -1,11 +1,9 @@
-import { eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { createOpponentInputSchema } from "@/lib/contracts/admin";
 import { logServerError } from "@/lib/server/observability";
 import { getRuntimeConnectionSummary } from "@/lib/server/runtime-diagnostics";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { requireOrganizationRole } from "@/server/auth/context";
-import { getDb } from "@/server/db/client";
-import { opponents } from "@/server/db/schema";
 import { createOpponent } from "@/server/services/football-admin-service";
 
 export async function GET(request: NextRequest) {
@@ -17,9 +15,18 @@ export async function GET(request: NextRequest) {
     }
 
     await requireOrganizationRole(organizationId, "read_only");
-    const db = getDb();
-    const rows = await db.select().from(opponents).where(eq(opponents.organizationId, organizationId));
-    return NextResponse.json({ items: rows });
+    const supabaseAdmin = createSupabaseAdminClient();
+    const { data, error } = await supabaseAdmin
+      .from("opponents")
+      .select("*")
+      .eq("organization_id", organizationId)
+      .order("school_name", { ascending: true });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return NextResponse.json({ items: data ?? [] });
   } catch (error) {
     logServerError("opponents-route", "list_failed", error, getRuntimeConnectionSummary());
 

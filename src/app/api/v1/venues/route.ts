@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { asc, eq } from "drizzle-orm";
 import { createVenueInputSchema } from "@/lib/contracts/admin";
 import { logServerError } from "@/lib/server/observability";
 import { getRuntimeConnectionSummary } from "@/lib/server/runtime-diagnostics";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { requireOrganizationRole } from "@/server/auth/context";
-import { getDb } from "@/server/db/client";
-import { venues } from "@/server/db/schema";
 import { createVenue } from "@/server/services/football-admin-service";
 
 export async function GET(request: NextRequest) {
@@ -17,14 +15,18 @@ export async function GET(request: NextRequest) {
     }
 
     await requireOrganizationRole(organizationId, "read_only");
+    const supabaseAdmin = createSupabaseAdminClient();
+    const { data, error } = await supabaseAdmin
+      .from("venues")
+      .select("*")
+      .eq("organization_id", organizationId)
+      .order("name", { ascending: true });
 
-    const db = getDb();
-    const items = await db.query.venues.findMany({
-      where: eq(venues.organizationId, organizationId),
-      orderBy: [asc(venues.name)]
-    });
+    if (error) {
+      throw new Error(error.message);
+    }
 
-    return NextResponse.json({ items });
+    return NextResponse.json({ items: data ?? [] });
   } catch (error) {
     logServerError("venues-route", "list_failed", error, getRuntimeConnectionSummary());
 

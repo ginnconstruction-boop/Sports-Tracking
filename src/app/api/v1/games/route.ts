@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { asc, eq } from "drizzle-orm";
 import { createGameInputSchema } from "@/lib/contracts/admin";
 import { logServerError } from "@/lib/server/observability";
 import { getRuntimeConnectionSummary } from "@/lib/server/runtime-diagnostics";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { requireOrganizationRole } from "@/server/auth/context";
-import { getDb } from "@/server/db/client";
-import { games, opponents, seasons, teams, venues } from "@/server/db/schema";
 import { createGame } from "@/server/services/football-admin-service";
 
 export async function GET(request: NextRequest) {
@@ -16,36 +14,75 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "seasonId is required." }, { status: 400 });
     }
 
-    const db = getDb();
-    const season = await db.query.seasons.findFirst({ where: eq(seasons.id, seasonId) });
+    const supabaseAdmin = createSupabaseAdminClient();
+    const { data: season, error: seasonError } = await supabaseAdmin
+      .from("seasons")
+      .select("id,team_id")
+      .eq("id", seasonId)
+      .maybeSingle<{ id: string; team_id: string }>();
+
+    if (seasonError) {
+      throw new Error(seasonError.message);
+    }
 
     if (!season) {
       return NextResponse.json({ error: "season not found" }, { status: 404 });
     }
 
-    const team = await db.query.teams.findFirst({ where: eq(teams.id, season.teamId) });
+    const { data: team, error: teamError } = await supabaseAdmin
+      .from("teams")
+      .select("id,organization_id")
+      .eq("id", season.team_id)
+      .maybeSingle<{ id: string; organization_id: string }>();
+
+    if (teamError) {
+      throw new Error(teamError.message);
+    }
 
     if (!team) {
       return NextResponse.json({ error: "team not found" }, { status: 404 });
     }
 
-    await requireOrganizationRole(team.organizationId, "read_only");
+    await requireOrganizationRole(team.organization_id, "read_only");
 
-    const rows = await db
-      .select({
-        game: games,
-        opponentSchoolName: opponents.schoolName,
-        venueName: venues.name,
-        venueCity: venues.city,
-        venueState: venues.state
-      })
-      .from(games)
-      .innerJoin(opponents, eq(games.opponentId, opponents.id))
-      .leftJoin(venues, eq(games.venueId, venues.id))
-      .where(eq(games.seasonId, seasonId))
-      .orderBy(asc(games.kickoffAt), asc(games.createdAt));
+    const { data, error } = await supabaseAdmin
+      .from("games")
+      .select(
+        "id,season_id,opponent_id,status,venue_id,kickoff_at,arrival_at,report_at,home_away,current_revision,opponents!inner(school_name),venues(name,city,state)"
+      )
+      .eq("season_id", seasonId)
+      .order("kickoff_at", { ascending: true, nullsFirst: true })
+      .order("created_at", { ascending: true });
 
-    return NextResponse.json({ items: rows });
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const items = (data ?? []).map((row) => {
+      const opponent = Array.isArray(row.opponents) ? row.opponents[0] : row.opponents;
+      const venue = Array.isArray(row.venues) ? row.venues[0] : row.venues;
+
+      return {
+        game: {
+          id: row.id,
+          seasonId: row.season_id,
+          opponentId: row.opponent_id,
+          status: row.status,
+          venueId: row.venue_id,
+          kickoffAt: row.kickoff_at,
+          arrivalAt: row.arrival_at,
+          reportAt: row.report_at,
+          homeAway: row.home_away,
+          currentRevision: row.current_revision
+        },
+        opponentSchoolName: opponent?.school_name ?? "Unknown opponent",
+        venueName: venue?.name ?? null,
+        venueCity: venue?.city ?? null,
+        venueState: venue?.state ?? null
+      };
+    });
+
+    return NextResponse.json({ items });
   } catch (error) {
     logServerError("games-route", "list_failed", error, getRuntimeConnectionSummary());
 
