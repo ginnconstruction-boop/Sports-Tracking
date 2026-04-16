@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { logServerError } from "@/lib/server/observability";
+import { getRuntimeConnectionSummary } from "@/lib/server/runtime-diagnostics";
 import { getCurrentUserMemberships } from "@/server/auth/context";
 
 export async function GET() {
@@ -12,9 +14,12 @@ export async function GET() {
       memberships
     });
   } catch (error) {
+    logServerError("me-route", "load_failed", error, getRuntimeConnectionSummary());
+
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to load current user."
+        error: error instanceof Error ? error.message : "Unable to load current user.",
+        runtime: getRuntimeConnectionSummary()
       },
       { status: 500 }
     );

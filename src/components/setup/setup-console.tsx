@@ -158,6 +158,24 @@ async function readJson<T>(input: RequestInfo, init?: RequestInit) {
 
 function messageFromError(error: unknown, fallback: string) {
   if (typeof error === "object" && error && "error" in error && typeof error.error === "string") {
+    const runtime =
+      "runtime" in error && typeof error.runtime === "object" && error.runtime
+        ? error.runtime
+        : null;
+
+    if (runtime && "databaseHost" in runtime && "supabaseHost" in runtime) {
+      const databaseHost =
+        typeof runtime.databaseHost === "string" && runtime.databaseHost.length > 0
+          ? runtime.databaseHost
+          : "n/a";
+      const supabaseHost =
+        typeof runtime.supabaseHost === "string" && runtime.supabaseHost.length > 0
+          ? runtime.supabaseHost
+          : "n/a";
+
+      return `${error.error} (db: ${databaseHost}; supabase: ${supabaseHost})`;
+    }
+
     return error.error;
   }
 
