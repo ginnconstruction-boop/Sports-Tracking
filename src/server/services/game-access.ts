@@ -95,9 +95,11 @@ async function getGameContext(gameId: string) {
 
 export async function requireGameRole(gameId: string, minimumRole: MembershipRole) {
   const context = await getGameContext(gameId);
-  await requireOrganizationRole(context.team.organization_id, minimumRole);
+  const access = await requireOrganizationRole(context.team.organization_id, minimumRole);
 
   return {
+    user: access.user,
+    membership: access.membership,
     game: {
       id: context.game.id,
       seasonId: context.game.season_id,

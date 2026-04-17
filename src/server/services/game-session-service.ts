@@ -10,6 +10,21 @@ export class ActiveWriterConflictError extends Error {
   }
 }
 
+class OpenGameSessionStepError extends Error {
+  step: string;
+  details: Record<string, unknown>;
+
+  constructor(step: string, message: string, details: Record<string, unknown> = {}, cause?: unknown) {
+    super(message);
+    this.name = "OpenGameSessionStepError";
+    this.step = step;
+    this.details = details;
+    if (cause instanceof Error && cause.stack) {
+      this.stack = cause.stack;
+    }
+  }
+}
+
 type GameSessionRow = {
   id: string;
   game_id: string;
@@ -49,8 +64,40 @@ function isActiveWriterConstraintError(error: { code?: string; message?: string 
 }
 
 export async function openGameSession(gameId: string, input: OpenGameSessionInput) {
-  const access = await requireGameRole(gameId, "stat_operator");
-  const user = await requireAuthenticatedUser();
+  let currentStep = "requireGameRole";
+  let access: Awaited<ReturnType<typeof requireGameRole>>;
+  try {
+    access = await requireGameRole(gameId, "stat_operator");
+  } catch (error) {
+    logServerError("game-session", "step_failed", error, {
+      step: currentStep,
+      gameId,
+      deviceKey: input.deviceKey
+    });
+    throw new OpenGameSessionStepError(currentStep, error instanceof Error ? error.message : "Access check failed.", {
+      gameId,
+      deviceKey: input.deviceKey
+    }, error);
+  }
+
+  currentStep = "requireAuthenticatedUser";
+  let user;
+  try {
+    user = await requireAuthenticatedUser();
+  } catch (error) {
+    logServerError("game-session", "step_failed", error, {
+      step: currentStep,
+      gameId,
+      organizationId: access.team.organizationId,
+      deviceKey: input.deviceKey
+    });
+    throw new OpenGameSessionStepError(currentStep, error instanceof Error ? error.message : "User resolution failed.", {
+      gameId,
+      organizationId: access.team.organizationId,
+      deviceKey: input.deviceKey
+    }, error);
+  }
+
   const supabaseAdmin = createSupabaseAdminClient();
   const nowIso = new Date().toISOString();
 
@@ -60,10 +107,18 @@ export async function openGameSession(gameId: string, input: OpenGameSessionInpu
     gameId,
     organizationId: access.team.organizationId,
     userId: user.id,
+    email: user.email,
     deviceKey: input.deviceKey,
-    requestActiveWriter: input.requestActiveWriter
+    requestActiveWriter: input.requestActiveWriter,
+    resolvedMembership: access.membership.role,
+    gameLookup: {
+      id: access.game.id,
+      seasonId: access.game.seasonId,
+      status: access.game.status
+    }
   });
 
+  currentStep = "expire_stale_writer_leases";
   const expiredWriterReset = await supabaseAdmin
     .from("game_sessions")
     .update({
@@ -78,11 +133,19 @@ export async function openGameSession(gameId: string, input: OpenGameSessionInpu
       gameId,
       organizationId: access.team.organizationId,
       userId: user.id,
+      email: user.email,
       deviceKey: input.deviceKey
     });
-    throw new Error(expiredWriterReset.error.message);
+    throw new OpenGameSessionStepError(currentStep, expiredWriterReset.error.message, {
+      gameId,
+      organizationId: access.team.organizationId,
+      userId: user.id,
+      email: user.email,
+      deviceKey: input.deviceKey
+    }, expiredWriterReset.error);
   }
 
+  currentStep = "lookup_existing_session";
   const { data: existingSession, error: existingSessionError } = await supabaseAdmin
     .from("game_sessions")
     .select(
@@ -109,9 +172,16 @@ export async function openGameSession(gameId: string, input: OpenGameSessionInpu
       gameId,
       organizationId: access.team.organizationId,
       userId: user.id,
+      email: user.email,
       deviceKey: input.deviceKey
     });
-    throw new Error(existingSessionError.message);
+    throw new OpenGameSessionStepError(currentStep, existingSessionError.message, {
+      gameId,
+      organizationId: access.team.organizationId,
+      userId: user.id,
+      email: user.email,
+      deviceKey: input.deviceKey
+    }, existingSessionError);
   }
 
   logServerEvent({
@@ -120,6 +190,7 @@ export async function openGameSession(gameId: string, input: OpenGameSessionInpu
     gameId,
     organizationId: access.team.organizationId,
     userId: user.id,
+    email: user.email,
     deviceKey: input.deviceKey,
     existingSession: existingSession
       ? {
@@ -134,6 +205,7 @@ export async function openGameSession(gameId: string, input: OpenGameSessionInpu
   });
 
   if (input.requestActiveWriter) {
+    currentStep = "lookup_active_writer";
     const { data: activeWriter, error: activeWriterError } = await supabaseAdmin
       .from("game_sessions")
       .select("id")
@@ -148,9 +220,16 @@ export async function openGameSession(gameId: string, input: OpenGameSessionInpu
         gameId,
         organizationId: access.team.organizationId,
         userId: user.id,
+        email: user.email,
         deviceKey: input.deviceKey
       });
-      throw new Error(activeWriterError.message);
+      throw new OpenGameSessionStepError(currentStep, activeWriterError.message, {
+        gameId,
+        organizationId: access.team.organizationId,
+        userId: user.id,
+        email: user.email,
+        deviceKey: input.deviceKey
+      }, activeWriterError);
     }
 
     if (activeWriter) {
@@ -160,6 +239,7 @@ export async function openGameSession(gameId: string, input: OpenGameSessionInpu
         gameId,
         organizationId: access.team.organizationId,
         userId: user.id,
+        email: user.email,
         deviceKey: input.deviceKey,
         activeWriterId: activeWriter.id
       });
@@ -178,6 +258,7 @@ export async function openGameSession(gameId: string, input: OpenGameSessionInpu
     remote_revision: input.remoteRevision
   };
 
+  currentStep = "upsert_session";
   const { data, error } = await supabaseAdmin
     .from("game_sessions")
     .upsert(upsertPayload, {
@@ -196,6 +277,7 @@ export async function openGameSession(gameId: string, input: OpenGameSessionInpu
         gameId,
         organizationId: access.team.organizationId,
         userId: user.id,
+        email: user.email,
         deviceKey: input.deviceKey
       });
       throw new ActiveWriterConflictError();
@@ -205,9 +287,16 @@ export async function openGameSession(gameId: string, input: OpenGameSessionInpu
       gameId,
       organizationId: access.team.organizationId,
       userId: user.id,
+      email: user.email,
       deviceKey: input.deviceKey
     });
-    throw new Error(error.message);
+    throw new OpenGameSessionStepError(currentStep, error.message, {
+      gameId,
+      organizationId: access.team.organizationId,
+      userId: user.id,
+      email: user.email,
+      deviceKey: input.deviceKey
+    }, error);
   }
 
   if (!data) {
@@ -215,9 +304,16 @@ export async function openGameSession(gameId: string, input: OpenGameSessionInpu
       gameId,
       organizationId: access.team.organizationId,
       userId: user.id,
+      email: user.email,
       deviceKey: input.deviceKey
     });
-    throw new Error("Game session could not be created.");
+    throw new OpenGameSessionStepError(currentStep, "Game session could not be created.", {
+      gameId,
+      organizationId: access.team.organizationId,
+      userId: user.id,
+      email: user.email,
+      deviceKey: input.deviceKey
+    });
   }
 
   return mapSessionRow(data);

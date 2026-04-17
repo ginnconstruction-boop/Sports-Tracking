@@ -76,7 +76,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return errorResponse(
       500,
       error instanceof Error ? error.message : "Unable to open game session.",
-      "open_failed"
+      "open_failed",
+      error instanceof Error
+        ? {
+            stack: error.stack
+          }
+        : undefined
     );
   }
 }
@@ -105,7 +110,12 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     return errorResponse(
       500,
       error instanceof Error ? error.message : "Unable to sync game session.",
-      "sync_failed"
+      "sync_failed",
+      error instanceof Error
+        ? {
+            stack: error.stack
+          }
+        : undefined
     );
   }
 }
