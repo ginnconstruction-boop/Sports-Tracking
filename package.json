@@ -9,6 +9,11 @@
     "lint": "eslint .",
     "test": "tsx --test tests/**/*.test.ts",
     "typecheck": "tsc --noEmit",
+    "smoke:install": "playwright install chromium",
+    "smoke:seed": "tsx scripts/seed-smoke.ts --mode baseline",
+    "smoke:seed:full": "tsx scripts/seed-smoke.ts --mode full",
+    "smoke:reset": "tsx scripts/seed-smoke.ts --mode reset",
+    "smoke:test": "playwright test tests/e2e/mvp-core.smoke.spec.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push"
   },
@@ -27,6 +32,7 @@
     "zod": "latest"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",

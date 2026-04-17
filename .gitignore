@@ -7,4 +7,5 @@ coverage
 .env.*.local
 drizzle
 *.log
-
+playwright-report
+test-results
