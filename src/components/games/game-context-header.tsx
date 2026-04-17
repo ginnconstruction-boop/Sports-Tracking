@@ -7,8 +7,17 @@ type Props = {
   compact?: boolean;
 };
 
+const stableDateTimeFormatter = new Intl.DateTimeFormat("en-US", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "numeric",
+  minute: "2-digit",
+  timeZone: "UTC"
+});
+
 function formatDateTime(value?: string | null) {
-  return value ? new Date(value).toLocaleString() : "TBD";
+  return value ? stableDateTimeFormatter.format(new Date(value)) : "TBD";
 }
 
 function joinParts(parts: Array<string | null | undefined>) {
@@ -66,7 +75,7 @@ export function GameContextHeader({ record, compact = false }: Props) {
         <div className="metric-card">
           <div className="metric-label">Roster confirmed</div>
           <div className="metric-value">
-            {record.game.rosterConfirmedAt ? new Date(record.game.rosterConfirmedAt).toLocaleString() : "Pending"}
+            {record.game.rosterConfirmedAt ? formatDateTime(record.game.rosterConfirmedAt) : "Pending"}
           </div>
         </div>
         <div className="metric-card">

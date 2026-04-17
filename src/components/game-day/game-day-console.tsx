@@ -60,6 +60,17 @@ type MutationResponse = {
   revision: number;
 };
 
+const stableTimeFormatter = new Intl.DateTimeFormat("en-US", {
+  hour: "numeric",
+  minute: "2-digit",
+  second: "2-digit",
+  timeZone: "UTC"
+});
+
+function formatStableTime(value?: string | null) {
+  return value ? stableTimeFormatter.format(new Date(value)) : null;
+}
+
 function getDeviceKey() {
   const storageKey = "tracking-the-game:device-key";
   const existing = window.localStorage.getItem(storageKey);
@@ -962,10 +973,10 @@ export function GameDayConsole({ gameId, initialSnapshot }: GameDayConsoleProps)
                   <div className="stack-sm">
                     <div className="mono">{statusText}</div>
                     {session?.writerLeaseExpiresAt ? (
-                      <div className="mono">Lease until {new Date(session.writerLeaseExpiresAt).toLocaleTimeString()}</div>
+                      <div className="mono">Lease until {formatStableTime(session.writerLeaseExpiresAt)}</div>
                     ) : null}
                     {snapshot.lastRebuiltAt ? (
-                      <div className="mono">Last rebuild {new Date(snapshot.lastRebuiltAt).toLocaleTimeString()}</div>
+                      <div className="mono">Last rebuild {formatStableTime(snapshot.lastRebuiltAt)}</div>
                     ) : null}
                     {errorText ? <div className="error-note">{errorText}</div> : null}
                     <div className="timeline-actions">
