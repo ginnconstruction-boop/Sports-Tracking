@@ -10,6 +10,8 @@ export const gameStatusValues = [
   "postponed"
 ] as const;
 
+const isoDateTimeWithOffset = z.string().datetime({ offset: true });
+
 export const rosterColumnKeys = [
   "firstName",
   "lastName",
@@ -80,9 +82,9 @@ export const createGameInputSchema = z.object({
   seasonId: z.string().uuid(),
   opponentId: z.string().uuid(),
   venueId: z.string().uuid().optional(),
-  kickoffAt: z.string().datetime().optional(),
-  arrivalAt: z.string().datetime().optional(),
-  reportAt: z.string().datetime().optional(),
+  kickoffAt: isoDateTimeWithOffset.optional(),
+  arrivalAt: isoDateTimeWithOffset.optional(),
+  reportAt: isoDateTimeWithOffset.optional(),
   homeAway: z.enum(["home", "away"]),
   status: z.enum(gameStatusValues).default("scheduled"),
   weatherConditions: z.string().max(160).optional(),
