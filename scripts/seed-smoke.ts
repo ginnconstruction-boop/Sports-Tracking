@@ -16,7 +16,13 @@ function parseMode(argv: string[]) {
 
 async function main() {
   const mode = parseMode(process.argv.slice(2));
-  const normalizedMode = mode === "full" || mode === "reset" ? mode : "baseline";
+  const normalizedMode = mode === "full" || mode === "reset" || mode === "none" ? mode : "baseline";
+
+  if (normalizedMode === "none") {
+    console.log(JSON.stringify({ mode: "none", skipped: true }, null, 2));
+    return;
+  }
+
   const result = await seedSmokeEnvironment(normalizedMode);
   console.log(JSON.stringify(result, null, 2));
 }

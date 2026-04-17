@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 export type SmokeTarget = "local" | "deployed";
-export type SmokeSeedMode = "baseline" | "full" | "reset";
+export type SmokeSeedMode = "baseline" | "full" | "reset" | "none";
 
 let envLoaded = false;
 
@@ -117,15 +117,30 @@ export function resolveSmokeConfig() {
 
 export function validateSmokeEnvironment() {
   const smoke = resolveSmokeConfig();
+  const seedMode = process.env.SMOKE_SEED_MODE === "full"
+    ? "full"
+    : process.env.SMOKE_SEED_MODE === "reset"
+      ? "reset"
+      : process.env.SMOKE_SEED_MODE === "none"
+        ? "none"
+        : "baseline";
   const missing: string[] = [];
 
-  for (const name of [
-    "NEXT_PUBLIC_SUPABASE_URL",
-    "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
-    "SUPABASE_SERVICE_ROLE_KEY"
-  ]) {
-    if (!process.env[name]) {
-      missing.push(name);
+  if (smoke.target === "local") {
+    for (const name of [
+      "NEXT_PUBLIC_SUPABASE_URL",
+      "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+      "SUPABASE_SERVICE_ROLE_KEY"
+    ]) {
+      if (!process.env[name]) {
+        missing.push(name);
+      }
+    }
+  } else if (seedMode !== "none") {
+    for (const name of ["NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]) {
+      if (!process.env[name]) {
+        missing.push(name);
+      }
     }
   }
 

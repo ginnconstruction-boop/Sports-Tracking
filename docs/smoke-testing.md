@@ -98,6 +98,10 @@ The smoke harness uses a dedicated smoke identity and smoke-owned organization.
 - `reset`
   - same cleanup behavior as baseline, without recreating child data
 
+- `none`
+  - skips seeding entirely
+  - useful for running against an already-prepared deployed beta without service-role access
+
 ### Reset / reseed safety
 
 Cleanup is intentionally limited to the dedicated smoke organization. Do not point smoke settings at a real production organization you care about.
@@ -141,6 +145,7 @@ Make sure the smoke email is allowed by the private-beta allowlist in the deploy
 ```powershell
 $env:SMOKE_TARGET='deployed'
 $env:SMOKE_BASE_URL='https://sports-tracking-blue.vercel.app'
+$env:SMOKE_SEED_MODE='none'
 $env:SMOKE_TEST_EMAIL='your-smoke-user@example.com'
 $env:SMOKE_TEST_PASSWORD='your-password'
 npm run smoke:test

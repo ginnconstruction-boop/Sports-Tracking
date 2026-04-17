@@ -7,7 +7,14 @@ export default async function globalSetup(_config: FullConfig) {
       ? "full"
       : process.env.SMOKE_SEED_MODE === "reset"
         ? "reset"
+        : process.env.SMOKE_SEED_MODE === "none"
+          ? "none"
         : "baseline";
+
+  if (mode === "none") {
+    console.log("[smoke-seed] mode=none (skipping seed)");
+    return;
+  }
 
   const result = await seedSmokeEnvironment(mode);
   console.log(
