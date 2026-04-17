@@ -155,10 +155,41 @@ async function readJson<T>(input: RequestInfo, init?: RequestInit) {
       ...(init?.headers ?? {})
     }
   });
-  const body = await response.json();
-  if (!response.ok) {
-    throw new Error(body.error?.message ?? body.error ?? "Request failed.");
+  const rawBody = await response.text();
+  let body: unknown = null;
+
+  if (rawBody) {
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      if (!response.ok) {
+        throw new Error(`Request failed with status ${response.status}.`);
+      }
+
+      throw new Error("Server returned an invalid JSON response.");
+    }
   }
+
+  if (!response.ok) {
+    const errorPayload =
+      typeof body === "object" && body !== null
+        ? (body as { error?: { message?: string } | string })
+        : null;
+
+    const message =
+      typeof errorPayload?.error === "string"
+        ? errorPayload.error
+        : typeof errorPayload?.error?.message === "string"
+          ? errorPayload.error.message
+          : `Request failed with status ${response.status}.`;
+
+    throw new Error(message);
+  }
+
+  if (body === null) {
+    throw new Error("Server returned an empty response.");
+  }
+
   return body as T;
 }
 
