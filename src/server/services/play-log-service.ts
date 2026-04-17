@@ -1,6 +1,15 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { CreatePlayEventInput, UpdatePlayEventInput } from "@/lib/contracts/play-log";
+import type {
+  PlayParticipantRole,
+  PlayPenaltyEnforcement,
+  PlayPenaltyResult,
+  PlayPenaltyTiming,
+  PlayRecord,
+  PlayType
+} from "@/lib/domain/play-log";
 import { compareSequence } from "@/lib/engine/sequence";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { requireAuthenticatedUser } from "@/server/auth/context";
 import { getDb } from "@/server/db/client";
 import {
@@ -44,6 +53,42 @@ type PlaySnapshot = {
     replayDown: boolean;
     noPlay: boolean;
   }[];
+};
+
+type PlayEventRow = {
+  id: string;
+  sequence: string;
+  client_mutation_id: string | null;
+  quarter: number;
+  clock_seconds: number;
+  possession: "home" | "away";
+  play_type: string;
+  summary: string | null;
+  payload: Record<string, unknown> | null;
+};
+
+type PlayParticipantRow = {
+  play_id: string;
+  game_roster_entry_id: string | null;
+  role: string;
+  side: "home" | "away";
+  credit_units: number;
+  stat_payload: Record<string, unknown> | null;
+};
+
+type PlayPenaltyRow = {
+  play_id: string;
+  penalized_side: "home" | "away";
+  code: string;
+  yards: number;
+  result: string;
+  enforcement_type: string;
+  timing: string;
+  foul_spot: Record<string, unknown> | null;
+  automatic_first_down: boolean;
+  loss_of_down: boolean;
+  replay_down: boolean;
+  no_play: boolean;
 };
 
 async function bumpGameRevision(tx: DbTransaction, gameId: string) {
@@ -122,12 +167,88 @@ async function writePlayAudit(
 
 export async function listPlayEvents(gameId: string) {
   await requireGameRole(gameId, "read_only");
-  const db = getDb();
+  const supabaseAdmin = createSupabaseAdminClient();
+  const { data: events, error: eventsError } = await supabaseAdmin
+    .from("play_events")
+    .select("id,sequence,client_mutation_id,quarter,clock_seconds,possession,play_type,summary,payload")
+    .eq("game_id", gameId)
+    .order("sequence", { ascending: true })
+    .returns<PlayEventRow[]>();
 
-  return db.query.playEvents.findMany({
-    where: eq(playEvents.gameId, gameId),
-    orderBy: (fields) => [asc(fields.sequence)]
-  });
+  if (eventsError) {
+    throw new Error(eventsError.message);
+  }
+
+  const eventRows = events ?? [];
+  const playIds = eventRows.map((event) => event.id);
+  let participants: PlayParticipantRow[] = [];
+  let penalties: PlayPenaltyRow[] = [];
+
+  if (playIds.length > 0) {
+    const [participantsRows, penaltiesRows] = await Promise.all([
+      supabaseAdmin
+        .from("play_participants")
+        .select("play_id,game_roster_entry_id,role,side,credit_units,stat_payload")
+        .in("play_id", playIds)
+        .returns<PlayParticipantRow[]>(),
+      supabaseAdmin
+        .from("play_penalties")
+        .select("play_id,penalized_side,code,yards,result,enforcement_type,timing,foul_spot,automatic_first_down,loss_of_down,replay_down,no_play")
+        .in("play_id", playIds)
+        .returns<PlayPenaltyRow[]>()
+    ]);
+
+    if (participantsRows.error) {
+      throw new Error(participantsRows.error.message);
+    }
+
+    if (penaltiesRows.error) {
+      throw new Error(penaltiesRows.error.message);
+    }
+
+    participants = participantsRows.data ?? [];
+    penalties = penaltiesRows.data ?? [];
+  }
+
+  return eventRows.map(
+    (event) =>
+      ({
+        id: event.id,
+        gameId,
+        sequence: event.sequence,
+        clientMutationId: event.client_mutation_id,
+        quarter: event.quarter as 1 | 2 | 3 | 4 | 5,
+        clockSeconds: event.clock_seconds,
+        possession: event.possession,
+        playType: event.play_type as PlayType,
+        summary: event.summary,
+        payload: (event.payload ?? {}) as PlayRecord["payload"],
+        participants: participants
+          .filter((participant) => participant.play_id === event.id)
+          .map((participant) => ({
+            gameRosterEntryId: participant.game_roster_entry_id ?? undefined,
+            role: participant.role as PlayParticipantRole,
+            side: participant.side,
+            creditUnits: participant.credit_units,
+            statPayload: (participant.stat_payload ?? undefined) as Record<string, unknown> | undefined
+          })),
+        penalties: penalties
+          .filter((penalty) => penalty.play_id === event.id)
+          .map((penalty) => ({
+            penalizedSide: penalty.penalized_side,
+            code: penalty.code,
+            yards: penalty.yards,
+            result: penalty.result as PlayPenaltyResult,
+            enforcementType: penalty.enforcement_type as PlayPenaltyEnforcement,
+            timing: penalty.timing as PlayPenaltyTiming,
+            foulSpot: (penalty.foul_spot ?? undefined) as PlayRecord["penalties"][number]["foulSpot"],
+            automaticFirstDown: penalty.automatic_first_down,
+            lossOfDown: penalty.loss_of_down,
+            replayDown: penalty.replay_down,
+            noPlay: penalty.no_play
+          }))
+      }) satisfies PlayRecord
+  );
 }
 
 export async function createPlayEvent(gameId: string, input: CreatePlayEventInput) {
