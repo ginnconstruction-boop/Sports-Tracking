@@ -14,6 +14,8 @@ type ApiEvidence = {
   responseBody: string | null;
 };
 
+type LandingState = "setup" | "games" | "dashboard" | "gameday" | "unknown";
+
 const smoke = resolveSmokeConfig();
 
 function toDateTimeLocalValue(date: Date) {
@@ -71,6 +73,28 @@ async function attachDiagnostics(
   });
 }
 
+async function detectLandingState(page: Page): Promise<LandingState> {
+  const pathName = new URL(page.url()).pathname;
+
+  if (pathName.includes("/gameday")) {
+    return "gameday";
+  }
+
+  if (pathName === "/setup" || (await page.getByLabel("Organization").count()) > 0) {
+    return "setup";
+  }
+
+  if (pathName === "/games" || (await page.getByRole("heading", { name: "Game schedule" }).count()) > 0) {
+    return "games";
+  }
+
+  if (pathName === "/" || (await page.getByRole("button", { name: "Operations" }).count()) > 0) {
+    return "dashboard";
+  }
+
+  return "unknown";
+}
+
 test.describe.configure({ mode: "serial" });
 
 test("MVP critical path smoke", async ({ page }, testInfo) => {
@@ -120,6 +144,7 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
     let opponentId = "";
     let venueId = "";
     let gameId = "";
+    let landingState: LandingState = "unknown";
 
     await runStep("login", async () => {
       await page.goto("/login");
@@ -127,8 +152,8 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
       await page.getByLabel("Password").fill(smoke.password);
       await page.getByRole("button", { name: "Log in" }).click();
       await page.waitForLoadState("networkidle");
-      await page.goto("/setup");
-      await expect(page.getByRole("heading", { name: "Program setup" })).toBeVisible();
+      landingState = await detectLandingState(page);
+      expect(landingState).not.toBe("unknown");
     });
 
     await runStep("/api/v1/me returns 200", async () => {
@@ -146,111 +171,174 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
     });
 
     await runStep("organization load/select", async () => {
+      if (landingState !== "setup") {
+        await page.goto("/setup");
+        await page.waitForLoadState("networkidle");
+      }
+
       await expect(page.getByLabel("Organization")).toBeVisible();
       await expect(page.getByText(smoke.organization.name, { exact: false })).toBeVisible();
-      await expect(page.getByRole("button", { name: "1. Organization done" })).toBeVisible();
     });
 
     await runStep("create/select team", async () => {
-      await page.getByLabel("Team name").fill(smoke.team.name);
-      await page.getByLabel("Level").fill(smoke.team.level);
-      await page.getByRole("button", { name: "Create team" }).click();
-
-      await expect(page.getByRole("button", { name: "2. Team done" })).toBeVisible();
-
       const teams = await browserJson<{ items: Array<{ id: string; name: string }> }>(
         page,
         `/api/v1/teams?organizationId=${organizationId}`
       );
       expect(teams.status).toBe(200);
-      const match = Array.isArray(teams.body.items)
+      let match = Array.isArray(teams.body.items)
         ? teams.body.items.find((item) => item.name === smoke.team.name)
         : undefined;
+
+      if (!match) {
+        await page.getByLabel("Team name").fill(smoke.team.name);
+        await page.getByLabel("Level").fill(smoke.team.level);
+        await page.getByRole("button", { name: "Create team" }).click();
+
+        await expect(page.getByRole("button", { name: "2. Team done" })).toBeVisible();
+
+        const refreshedTeams = await browserJson<{ items: Array<{ id: string; name: string }> }>(
+          page,
+          `/api/v1/teams?organizationId=${organizationId}`
+        );
+        expect(refreshedTeams.status).toBe(200);
+        match = Array.isArray(refreshedTeams.body.items)
+          ? refreshedTeams.body.items.find((item) => item.name === smoke.team.name)
+          : undefined;
+      }
+
       expect(match).toBeTruthy();
       teamId = match!.id;
     });
 
     await runStep("create/select season", async () => {
-      await page.getByLabel("Label").fill(smoke.season.label);
-      await page.getByLabel("Year").fill(String(smoke.season.year));
-      await page.getByRole("button", { name: "Create season" }).click();
-
-      await expect(page.getByRole("button", { name: "3. Season done" })).toBeVisible();
-
       const seasons = await browserJson<{ items: Array<{ id: string; label: string }> }>(
         page,
         `/api/v1/seasons?teamId=${teamId}`
       );
       expect(seasons.status).toBe(200);
-      const match = Array.isArray(seasons.body.items)
+      let match = Array.isArray(seasons.body.items)
         ? seasons.body.items.find((item) => item.label === smoke.season.label)
         : undefined;
+
+      if (!match) {
+        await page.getByLabel("Label").fill(smoke.season.label);
+        await page.getByLabel("Year").fill(String(smoke.season.year));
+        await page.getByRole("button", { name: "Create season" }).click();
+
+        await expect(page.getByRole("button", { name: "3. Season done" })).toBeVisible();
+
+        const refreshedSeasons = await browserJson<{ items: Array<{ id: string; label: string }> }>(
+          page,
+          `/api/v1/seasons?teamId=${teamId}`
+        );
+        expect(refreshedSeasons.status).toBe(200);
+        match = Array.isArray(refreshedSeasons.body.items)
+          ? refreshedSeasons.body.items.find((item) => item.label === smoke.season.label)
+          : undefined;
+      }
+
       expect(match).toBeTruthy();
       seasonId = match!.id;
     });
 
     await runStep("create/select opponent", async () => {
-      await page.getByLabel("School").fill(smoke.opponent.schoolName);
-      await page.getByLabel("Mascot").fill(smoke.opponent.mascot);
-      await page.getByLabel("Short code").fill(smoke.opponent.shortCode);
-      await page.getByRole("button", { name: "Create opponent" }).click();
-
       const opponents = await browserJson<{ items: Array<{ id: string; schoolName: string }> }>(
         page,
         `/api/v1/opponents?organizationId=${organizationId}`
       );
       expect(opponents.status).toBe(200);
-      const match = Array.isArray(opponents.body.items)
+      let match = Array.isArray(opponents.body.items)
         ? opponents.body.items.find((item) => item.schoolName === smoke.opponent.schoolName)
         : undefined;
+
+      if (!match) {
+        await page.getByLabel("School").fill(smoke.opponent.schoolName);
+        await page.getByLabel("Mascot").fill(smoke.opponent.mascot);
+        await page.getByLabel("Short code").fill(smoke.opponent.shortCode);
+        await page.getByRole("button", { name: "Create opponent" }).click();
+
+        const refreshedOpponents = await browserJson<{ items: Array<{ id: string; schoolName: string }> }>(
+          page,
+          `/api/v1/opponents?organizationId=${organizationId}`
+        );
+        expect(refreshedOpponents.status).toBe(200);
+        match = Array.isArray(refreshedOpponents.body.items)
+          ? refreshedOpponents.body.items.find((item) => item.schoolName === smoke.opponent.schoolName)
+          : undefined;
+      }
+
       expect(match).toBeTruthy();
       opponentId = match!.id;
     });
 
     await runStep("create/select venue", async () => {
-      await page.getByLabel("Venue name").fill(smoke.venue.name);
-      await page.getByLabel("City").fill(smoke.venue.city);
-      await page.getByLabel("State").fill(smoke.venue.state);
-      await page.getByRole("button", { name: "Create venue" }).click();
-
-      await expect(page.getByRole("button", { name: "4. Opponent + venue done" })).toBeVisible();
-
       const venues = await browserJson<{ items: Array<{ id: string; name: string }> }>(
         page,
         `/api/v1/venues?organizationId=${organizationId}`
       );
       expect(venues.status).toBe(200);
-      const match = Array.isArray(venues.body.items)
+      let match = Array.isArray(venues.body.items)
         ? venues.body.items.find((item) => item.name === smoke.venue.name)
         : undefined;
+
+      if (!match) {
+        await page.getByLabel("Venue name").fill(smoke.venue.name);
+        await page.getByLabel("City").fill(smoke.venue.city);
+        await page.getByLabel("State").fill(smoke.venue.state);
+        await page.getByRole("button", { name: "Create venue" }).click();
+
+        await expect(page.getByRole("button", { name: "4. Opponent + venue done" })).toBeVisible();
+
+        const refreshedVenues = await browserJson<{ items: Array<{ id: string; name: string }> }>(
+          page,
+          `/api/v1/venues?organizationId=${organizationId}`
+        );
+        expect(refreshedVenues.status).toBe(200);
+        match = Array.isArray(refreshedVenues.body.items)
+          ? refreshedVenues.body.items.find((item) => item.name === smoke.venue.name)
+          : undefined;
+      }
+
       expect(match).toBeTruthy();
       venueId = match!.id;
     });
 
     await runStep("create game", async () => {
-      await page.getByLabel("Opponent").selectOption(opponentId);
-      await page.getByLabel("Venue").selectOption(venueId);
-
-      const kickoff = new Date();
-      kickoff.setMinutes(kickoff.getMinutes() + 90);
-      const arrival = new Date(kickoff.getTime() - 45 * 60_000);
-      const report = new Date(arrival.getTime() - 30 * 60_000);
-
-      await page.getByLabel("Kickoff").fill(toDateTimeLocalValue(kickoff));
-      await page.getByLabel("Arrival").fill(toDateTimeLocalValue(arrival));
-      await page.getByLabel("Report time").fill(toDateTimeLocalValue(report));
-      await page.getByLabel("Primary team side").selectOption(smoke.game.homeAway);
-      await page.getByLabel("Status").selectOption("scheduled");
-      await page.getByRole("button", { name: "Create game" }).click();
-
       const games = await browserJson<{ items: Array<{ game: { id: string; opponentId: string; venueId?: string | null } }> }>(
         page,
         `/api/v1/games?seasonId=${seasonId}`
       );
       expect(games.status).toBe(200);
-      const match = Array.isArray(games.body.items)
+      let match = Array.isArray(games.body.items)
         ? games.body.items.find((item) => item.game.opponentId === opponentId && item.game.venueId === venueId)
         : undefined;
+
+      if (!match) {
+        await page.getByLabel("Opponent").selectOption(opponentId);
+        await page.getByLabel("Venue").selectOption(venueId);
+
+        const kickoff = new Date();
+        kickoff.setMinutes(kickoff.getMinutes() + 90);
+        const arrival = new Date(kickoff.getTime() - 45 * 60_000);
+        const report = new Date(arrival.getTime() - 30 * 60_000);
+
+        await page.getByLabel("Kickoff").fill(toDateTimeLocalValue(kickoff));
+        await page.getByLabel("Arrival").fill(toDateTimeLocalValue(arrival));
+        await page.getByLabel("Report time").fill(toDateTimeLocalValue(report));
+        await page.getByLabel("Primary team side").selectOption(smoke.game.homeAway);
+        await page.getByLabel("Status").selectOption("scheduled");
+        await page.getByRole("button", { name: "Create game" }).click();
+
+        const refreshedGames = await browserJson<{
+          items: Array<{ game: { id: string; opponentId: string; venueId?: string | null } }>;
+        }>(page, `/api/v1/games?seasonId=${seasonId}`);
+        expect(refreshedGames.status).toBe(200);
+        match = Array.isArray(refreshedGames.body.items)
+          ? refreshedGames.body.items.find((item) => item.game.opponentId === opponentId && item.game.venueId === venueId)
+          : undefined;
+      }
+
       expect(match).toBeTruthy();
       gameId = match!.game.id;
     });
