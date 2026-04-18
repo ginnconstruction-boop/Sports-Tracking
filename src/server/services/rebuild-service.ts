@@ -22,7 +22,7 @@ type GameRow = {
 
 type PlayEventRow = {
   id: string;
-  sequence: string;
+  sequence: string | number;
   quarter: number;
   clock_seconds: number;
   possession: "home" | "away";
@@ -54,6 +54,10 @@ type PlayPenaltyRow = {
   replay_down: boolean;
   no_play: boolean;
 };
+
+function normalizeSequenceToken(sequence: string | number) {
+  return typeof sequence === "string" ? sequence : String(sequence);
+}
 
 export async function projectGameFromPlayLog(
   gameId: string,
@@ -127,7 +131,7 @@ export async function projectGameFromPlayLog(
   const typedEvents: PlayRecord[] = events.map((event) => ({
       id: event.id,
       gameId,
-      sequence: event.sequence,
+      sequence: normalizeSequenceToken(event.sequence),
       quarter: event.quarter as 1 | 2 | 3 | 4 | 5,
       clockSeconds: event.clock_seconds,
       possession: event.possession,

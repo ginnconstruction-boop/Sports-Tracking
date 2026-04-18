@@ -57,7 +57,7 @@ type PlaySnapshot = {
 
 type PlayEventRow = {
   id: string;
-  sequence: string;
+  sequence: string | number;
   client_mutation_id: string | null;
   quarter: number;
   clock_seconds: number;
@@ -94,7 +94,7 @@ type PlayPenaltyRow = {
 type PlayEventMutationRow = {
   id: string;
   game_id: string;
-  sequence: string;
+  sequence: string | number;
   client_mutation_id: string | null;
   quarter: number;
   clock_seconds: number;
@@ -174,11 +174,15 @@ async function writePlayAudit(
   });
 }
 
+function normalizeSequenceToken(sequence: string | number) {
+  return typeof sequence === "string" ? sequence : String(sequence);
+}
+
 function mapMutatedPlay(row: PlayEventMutationRow) {
   return {
     id: row.id,
     gameId: row.game_id,
-    sequence: row.sequence,
+    sequence: normalizeSequenceToken(row.sequence),
     clientMutationId: row.client_mutation_id,
     quarter: row.quarter,
     clockSeconds: row.clock_seconds,
@@ -242,7 +246,7 @@ export async function listPlayEvents(gameId: string) {
       ({
         id: event.id,
         gameId,
-        sequence: event.sequence,
+        sequence: normalizeSequenceToken(event.sequence),
         clientMutationId: event.client_mutation_id,
         quarter: event.quarter as 1 | 2 | 3 | 4 | 5,
         clockSeconds: event.clock_seconds,
@@ -314,7 +318,7 @@ export async function createPlayEvent(gameId: string, input: CreatePlayEventInpu
 
       return {
         play: mapMutatedPlay(existing),
-        rebuildFromSequence: existing.sequence,
+        rebuildFromSequence: normalizeSequenceToken(existing.sequence),
         revision: gameRevisionRow.current_revision,
         deduped: true
       };
@@ -455,7 +459,7 @@ export async function createPlayEvent(gameId: string, input: CreatePlayEventInpu
 
   return {
     play: mapMutatedPlay(insertedPlay),
-    rebuildFromSequence: input.sequence,
+    rebuildFromSequence: normalizeSequenceToken(input.sequence),
     revision
   };
 }
