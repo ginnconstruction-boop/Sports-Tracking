@@ -105,6 +105,10 @@ function pickPreferredMatch<T>(items: T[], predicate: (item: T) => boolean) {
   return items.find(predicate) ?? items[0];
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 test.describe.configure({ mode: "serial" });
 
 test("MVP critical path smoke", async ({ page }, testInfo) => {
@@ -156,6 +160,10 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
     let gameId = "";
     let landingState: LandingState = "unknown";
     let resolvedMembership: SmokeMembership | null = null;
+    let organizationName = "";
+    let teamName = "";
+    let opponentName = "";
+    let venueName = "";
     const setupMode = () => landingState === "setup";
 
     await runStep("login", async () => {
@@ -185,17 +193,19 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
       expect(membership).toBeTruthy();
       resolvedMembership = membership ?? null;
       organizationId = membership!.organizationId;
+      organizationName = membership!.organizationName;
     });
 
     await runStep("organization load/select", async () => {
       if (setupMode()) {
-        await expect(page.getByLabel("Organization")).toBeVisible();
-        await expect(page.getByText(resolvedMembership?.organizationName ?? smoke.organization.name, { exact: false })).toBeVisible();
+        const organizationSelect = page.getByLabel("Organization");
+        await expect(organizationSelect).toBeVisible();
+        await expect(organizationSelect).toHaveValue(organizationId);
         return;
       }
 
       expect(organizationId).toBeTruthy();
-      expect(resolvedMembership?.organizationName).toBeTruthy();
+      expect(organizationName).toBeTruthy();
     });
 
     await runStep("create/select team", async () => {
@@ -227,6 +237,7 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
 
       expect(match).toBeTruthy();
       teamId = match!.id;
+      teamName = match!.name;
     });
 
     await runStep("create/select season", async () => {
@@ -288,6 +299,7 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
 
       expect(match).toBeTruthy();
       opponentId = match!.id;
+      opponentName = match!.schoolName;
     });
 
     await runStep("create/select venue", async () => {
@@ -320,6 +332,7 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
 
       expect(match).toBeTruthy();
       venueId = match!.id;
+      venueName = match!.name;
     });
 
     await runStep("create game", async () => {
@@ -366,9 +379,15 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
 
     await runStep("games list load", async () => {
       await page.goto("/games");
+      const manageLink = page.locator(`a[href="/games/${gameId}/manage"]`);
+      const gameCard = manageLink.locator("xpath=ancestor::div[contains(@class,'timeline-card')][1]");
+      const gameGroup = manageLink.locator("xpath=ancestor::section[contains(@class,'section-card')][1]");
+
       await expect(page.getByRole("heading", { name: "Game schedule" })).toBeVisible();
-      await expect(page.getByText(smoke.team.name, { exact: false })).toBeVisible();
-      await expect(page.locator(`a[href="/games/${gameId}/manage"]`)).toBeVisible();
+      await expect(gameGroup.getByRole("heading", { name: new RegExp(escapeRegExp(teamName || smoke.team.name)) }).first()).toBeVisible();
+      await expect(gameCard).toContainText(opponentName || smoke.opponent.schoolName);
+      await expect(gameCard).toContainText(venueName || smoke.venue.name);
+      await expect(manageLink).toBeVisible();
     });
 
     await runStep("GET /api/v1/games/[gameId] returns 200", async () => {
@@ -384,6 +403,11 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
       await page.locator(`a[href="/games/${gameId}/manage"]`).click();
       await page.waitForURL(new RegExp(`/games/${gameId}/manage$`));
       await expect(page.getByRole("heading", { name: /Game admin/i })).toBeVisible();
+      await expect(
+        page.getByRole("heading", {
+          name: new RegExp(`${escapeRegExp(teamName || smoke.team.name)}\\s+vs\\s+${escapeRegExp(opponentName || smoke.opponent.schoolName)}`)
+        })
+      ).toBeVisible();
     });
 
     await runStep("Game Day open and session connect", async () => {
@@ -393,7 +417,7 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
           response.request().method() === "POST"
       );
 
-      await page.getByRole("link", { name: "Game Day Mode" }).click();
+      await page.locator(`a[href="/games/${gameId}/gameday"]`).first().click();
       await page.waitForURL(new RegExp(`/games/${gameId}/gameday$`));
 
       const sessionResponse = await sessionResponsePromise;
@@ -402,7 +426,11 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
 
       expect([201, 409]).toContain(sessionResponse.status());
       expect(sessionBody).toBeTruthy();
-      await expect(page.getByText(smoke.team.name, { exact: false })).toBeVisible();
+      await expect(
+        page.getByRole("heading", {
+          name: new RegExp(`${escapeRegExp(opponentName || smoke.opponent.schoolName)}\\s+(at|vs\\.)\\s+${escapeRegExp(teamName || smoke.team.name)}`)
+        }).first()
+      ).toBeVisible();
     });
 
     await runStep("live snapshot and plays load", async () => {
@@ -413,7 +441,7 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
 
       expect(live.status).toBe(200);
       expect(plays.status).toBe(200);
-      await expect(page.getByText("Live oversight")).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Live oversight" })).toBeVisible();
     });
 
     await runStep("submit one simple play", async () => {
