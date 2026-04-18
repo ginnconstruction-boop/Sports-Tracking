@@ -63,12 +63,14 @@ async function attachDiagnostics(
   consoleErrors: string[],
   currentStep: string
 ) {
-  const screenshotPath = testInfo.outputPath("final-page.png");
-  await page.screenshot({ path: screenshotPath, fullPage: true });
-  await testInfo.attach("final-page", {
-    path: screenshotPath,
-    contentType: "image/png"
-  });
+  if (!page.isClosed()) {
+    const screenshotPath = testInfo.outputPath("final-page.png");
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+    await testInfo.attach("final-page", {
+      path: screenshotPath,
+      contentType: "image/png"
+    });
+  }
   await testInfo.attach("api-evidence", {
     body: Buffer.from(JSON.stringify(apiEvidence, null, 2)),
     contentType: "application/json"
@@ -458,15 +460,15 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
       }
 
       await expect(submitButton).toBeEnabled();
-      const touchbackButton = playEntrySection.getByRole("button", { name: "Touchback", exact: true });
-      const likelyTouchbackButton = playEntrySection.getByRole("button", { name: "Likely touchback", exact: true });
-      if (await touchbackButton.count()) {
-        await touchbackButton.first().click();
-      } else if (await likelyTouchbackButton.count()) {
-        await likelyTouchbackButton.first().click();
-      } else {
-        await playEntrySection.getByLabel("Return result").selectOption("touchback");
+
+      const runButton = playEntrySection.getByRole("button", { name: "run", exact: true });
+      if (await runButton.count()) {
+        await runButton.first().click();
       }
+
+      const ballCarrierField = playEntrySection.getByLabel(/Ball carrier/i).first();
+      await expect(ballCarrierField).toBeVisible();
+      await ballCarrierField.fill("1");
 
       const playPost = page.waitForResponse(
         (response) =>
