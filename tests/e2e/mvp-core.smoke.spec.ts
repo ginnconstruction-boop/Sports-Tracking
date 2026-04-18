@@ -445,9 +445,12 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
     });
 
     await runStep("submit one simple play", async () => {
-      const submitButton = page.getByRole("button", { name: "Submit play" });
+      const playEntrySection = page
+        .getByRole("heading", { name: "Play Entry" })
+        .locator("xpath=ancestor::section[contains(@class,'section-card')][1]");
+      const submitButton = playEntrySection.getByRole("button", { name: "Submit play", exact: true });
       if (await submitButton.isDisabled()) {
-        const leaseButton = page.getByRole("button", { name: /Try writer lease|Trying\.\.\./ });
+        const leaseButton = page.getByRole("button", { name: /^(Try writer lease|Trying\.\.\.)$/ }).first();
         if (await leaseButton.count()) {
           await leaseButton.click();
           await page.waitForLoadState("networkidle");
@@ -455,12 +458,14 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
       }
 
       await expect(submitButton).toBeEnabled();
-      if (await page.getByRole("button", { name: "Touchback" }).count()) {
-        await page.getByRole("button", { name: "Touchback" }).click();
-      } else if (await page.getByRole("button", { name: "Likely touchback" }).count()) {
-        await page.getByRole("button", { name: "Likely touchback" }).click();
+      const touchbackButton = playEntrySection.getByRole("button", { name: "Touchback", exact: true });
+      const likelyTouchbackButton = playEntrySection.getByRole("button", { name: "Likely touchback", exact: true });
+      if (await touchbackButton.count()) {
+        await touchbackButton.first().click();
+      } else if (await likelyTouchbackButton.count()) {
+        await likelyTouchbackButton.first().click();
       } else {
-        await page.getByLabel("Return result").selectOption("touchback");
+        await playEntrySection.getByLabel("Return result").selectOption("touchback");
       }
 
       const playPost = page.waitForResponse(
