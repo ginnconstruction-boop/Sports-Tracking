@@ -15,6 +15,43 @@ import { requireGameRole } from "@/server/services/game-access";
 import { projectGameFromPlayLog } from "@/server/services/rebuild-service";
 
 type ReportExportRow = typeof reportExports.$inferSelect;
+type ReportExportTableRow = {
+  id: string;
+  game_id: string | null;
+  season_id: string | null;
+  report_type: string;
+  format: string;
+  status: "queued" | "processing" | "complete" | "failed";
+  requested_by_user_id: string | null;
+  storage_bucket: string | null;
+  storage_path: string | null;
+  content_type: string | null;
+  file_size_bytes: number | null;
+  error_message: string | null;
+  payload: GameReportDocument | null;
+  completed_at: string | null;
+  created_at: string;
+};
+
+function mapReportExportRow(row: ReportExportTableRow): ReportExportRow {
+  return {
+    id: row.id,
+    gameId: row.game_id,
+    seasonId: row.season_id,
+    reportType: row.report_type,
+    format: row.format,
+    status: row.status,
+    requestedByUserId: row.requested_by_user_id,
+    storageBucket: row.storage_bucket,
+    storagePath: row.storage_path,
+    contentType: row.content_type,
+    fileSizeBytes: row.file_size_bytes,
+    errorMessage: row.error_message,
+    payload: row.payload,
+    completedAt: row.completed_at ? new Date(row.completed_at) : null,
+    createdAt: new Date(row.created_at)
+  };
+}
 
 async function withDownloadUrl(job: ReportExportRow) {
   if (!job.storageBucket || !job.storagePath || job.status !== "complete") {
@@ -191,7 +228,17 @@ export async function processQueuedGameExport(exportId: string) {
 export async function listGameExports(gameId: string) {
   assertFeatureEnabled("reports_preview");
   await requireGameRole(gameId, "read_only");
-  const db = getDb();
-  const jobs = await db.select().from(reportExports).where(eq(reportExports.gameId, gameId));
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("report_exports")
+    .select("*")
+    .eq("game_id", gameId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  const jobs = (data ?? []).map((row) => mapReportExportRow(row as ReportExportTableRow));
   return Promise.all(jobs.map(withDownloadUrl));
 }
