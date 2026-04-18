@@ -15,6 +15,12 @@ type ApiEvidence = {
 };
 
 type LandingState = "setup" | "games" | "dashboard" | "gameday" | "unknown";
+type SmokeMembership = {
+  organizationId: string;
+  organizationName: string;
+  organizationSlug?: string;
+  role?: string;
+};
 
 const smoke = resolveSmokeConfig();
 
@@ -149,6 +155,7 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
     let venueId = "";
     let gameId = "";
     let landingState: LandingState = "unknown";
+    let resolvedMembership: SmokeMembership | null = null;
     const setupMode = () => landingState === "setup";
 
     await runStep("login", async () => {
@@ -165,24 +172,30 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
       const me = await browserJson<{
         id: string;
         email: string;
-        memberships: Array<{ organizationId: string; organizationName: string }>;
+        memberships: SmokeMembership[];
       }>(page, "/api/v1/me");
 
       expect(me.status).toBe(200);
       const memberships = Array.isArray(me.body?.memberships) ? me.body.memberships : [];
-      const membership = memberships.find((item) => item.organizationName === smoke.organization.name);
+      const membership = pickPreferredMatch(
+        memberships,
+        (item) =>
+          item.organizationName === smoke.organization.name || item.organizationSlug === smoke.organization.slug
+      );
       expect(membership).toBeTruthy();
+      resolvedMembership = membership ?? null;
       organizationId = membership!.organizationId;
     });
 
     await runStep("organization load/select", async () => {
       if (setupMode()) {
         await expect(page.getByLabel("Organization")).toBeVisible();
-        await expect(page.getByText(smoke.organization.name, { exact: false })).toBeVisible();
+        await expect(page.getByText(resolvedMembership?.organizationName ?? smoke.organization.name, { exact: false })).toBeVisible();
         return;
       }
 
       expect(organizationId).toBeTruthy();
+      expect(resolvedMembership?.organizationName).toBeTruthy();
     });
 
     await runStep("create/select team", async () => {
