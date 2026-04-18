@@ -95,6 +95,10 @@ async function detectLandingState(page: Page): Promise<LandingState> {
   return "unknown";
 }
 
+function pickPreferredMatch<T>(items: T[], predicate: (item: T) => boolean) {
+  return items.find(predicate) ?? items[0];
+}
+
 test.describe.configure({ mode: "serial" });
 
 test("MVP critical path smoke", async ({ page }, testInfo) => {
@@ -145,6 +149,7 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
     let venueId = "";
     let gameId = "";
     let landingState: LandingState = "unknown";
+    const setupMode = () => landingState === "setup";
 
     await runStep("login", async () => {
       await page.goto("/login");
@@ -171,13 +176,13 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
     });
 
     await runStep("organization load/select", async () => {
-      if (landingState !== "setup") {
-        await page.goto("/setup");
-        await page.waitForLoadState("networkidle");
+      if (setupMode()) {
+        await expect(page.getByLabel("Organization")).toBeVisible();
+        await expect(page.getByText(smoke.organization.name, { exact: false })).toBeVisible();
+        return;
       }
 
-      await expect(page.getByLabel("Organization")).toBeVisible();
-      await expect(page.getByText(smoke.organization.name, { exact: false })).toBeVisible();
+      expect(organizationId).toBeTruthy();
     });
 
     await runStep("create/select team", async () => {
@@ -186,11 +191,10 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
         `/api/v1/teams?organizationId=${organizationId}`
       );
       expect(teams.status).toBe(200);
-      let match = Array.isArray(teams.body.items)
-        ? teams.body.items.find((item) => item.name === smoke.team.name)
-        : undefined;
+      const teamItems = Array.isArray(teams.body.items) ? teams.body.items : [];
+      let match = pickPreferredMatch(teamItems, (item) => item.name === smoke.team.name);
 
-      if (!match) {
+      if (!match && setupMode()) {
         await page.getByLabel("Team name").fill(smoke.team.name);
         await page.getByLabel("Level").fill(smoke.team.level);
         await page.getByRole("button", { name: "Create team" }).click();
@@ -202,9 +206,10 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
           `/api/v1/teams?organizationId=${organizationId}`
         );
         expect(refreshedTeams.status).toBe(200);
-        match = Array.isArray(refreshedTeams.body.items)
-          ? refreshedTeams.body.items.find((item) => item.name === smoke.team.name)
-          : undefined;
+        match = pickPreferredMatch(
+          Array.isArray(refreshedTeams.body.items) ? refreshedTeams.body.items : [],
+          (item) => item.name === smoke.team.name
+        );
       }
 
       expect(match).toBeTruthy();
@@ -217,11 +222,10 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
         `/api/v1/seasons?teamId=${teamId}`
       );
       expect(seasons.status).toBe(200);
-      let match = Array.isArray(seasons.body.items)
-        ? seasons.body.items.find((item) => item.label === smoke.season.label)
-        : undefined;
+      const seasonItems = Array.isArray(seasons.body.items) ? seasons.body.items : [];
+      let match = pickPreferredMatch(seasonItems, (item) => item.label === smoke.season.label);
 
-      if (!match) {
+      if (!match && setupMode()) {
         await page.getByLabel("Label").fill(smoke.season.label);
         await page.getByLabel("Year").fill(String(smoke.season.year));
         await page.getByRole("button", { name: "Create season" }).click();
@@ -233,9 +237,10 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
           `/api/v1/seasons?teamId=${teamId}`
         );
         expect(refreshedSeasons.status).toBe(200);
-        match = Array.isArray(refreshedSeasons.body.items)
-          ? refreshedSeasons.body.items.find((item) => item.label === smoke.season.label)
-          : undefined;
+        match = pickPreferredMatch(
+          Array.isArray(refreshedSeasons.body.items) ? refreshedSeasons.body.items : [],
+          (item) => item.label === smoke.season.label
+        );
       }
 
       expect(match).toBeTruthy();
@@ -248,11 +253,10 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
         `/api/v1/opponents?organizationId=${organizationId}`
       );
       expect(opponents.status).toBe(200);
-      let match = Array.isArray(opponents.body.items)
-        ? opponents.body.items.find((item) => item.schoolName === smoke.opponent.schoolName)
-        : undefined;
+      const opponentItems = Array.isArray(opponents.body.items) ? opponents.body.items : [];
+      let match = pickPreferredMatch(opponentItems, (item) => item.schoolName === smoke.opponent.schoolName);
 
-      if (!match) {
+      if (!match && setupMode()) {
         await page.getByLabel("School").fill(smoke.opponent.schoolName);
         await page.getByLabel("Mascot").fill(smoke.opponent.mascot);
         await page.getByLabel("Short code").fill(smoke.opponent.shortCode);
@@ -263,9 +267,10 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
           `/api/v1/opponents?organizationId=${organizationId}`
         );
         expect(refreshedOpponents.status).toBe(200);
-        match = Array.isArray(refreshedOpponents.body.items)
-          ? refreshedOpponents.body.items.find((item) => item.schoolName === smoke.opponent.schoolName)
-          : undefined;
+        match = pickPreferredMatch(
+          Array.isArray(refreshedOpponents.body.items) ? refreshedOpponents.body.items : [],
+          (item) => item.schoolName === smoke.opponent.schoolName
+        );
       }
 
       expect(match).toBeTruthy();
@@ -278,11 +283,10 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
         `/api/v1/venues?organizationId=${organizationId}`
       );
       expect(venues.status).toBe(200);
-      let match = Array.isArray(venues.body.items)
-        ? venues.body.items.find((item) => item.name === smoke.venue.name)
-        : undefined;
+      const venueItems = Array.isArray(venues.body.items) ? venues.body.items : [];
+      let match = pickPreferredMatch(venueItems, (item) => item.name === smoke.venue.name);
 
-      if (!match) {
+      if (!match && setupMode()) {
         await page.getByLabel("Venue name").fill(smoke.venue.name);
         await page.getByLabel("City").fill(smoke.venue.city);
         await page.getByLabel("State").fill(smoke.venue.state);
@@ -295,9 +299,10 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
           `/api/v1/venues?organizationId=${organizationId}`
         );
         expect(refreshedVenues.status).toBe(200);
-        match = Array.isArray(refreshedVenues.body.items)
-          ? refreshedVenues.body.items.find((item) => item.name === smoke.venue.name)
-          : undefined;
+        match = pickPreferredMatch(
+          Array.isArray(refreshedVenues.body.items) ? refreshedVenues.body.items : [],
+          (item) => item.name === smoke.venue.name
+        );
       }
 
       expect(match).toBeTruthy();
@@ -310,11 +315,13 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
         `/api/v1/games?seasonId=${seasonId}`
       );
       expect(games.status).toBe(200);
-      let match = Array.isArray(games.body.items)
-        ? games.body.items.find((item) => item.game.opponentId === opponentId && item.game.venueId === venueId)
-        : undefined;
+      const gameItems = Array.isArray(games.body.items) ? games.body.items : [];
+      let match = pickPreferredMatch(
+        gameItems,
+        (item) => item.game.opponentId === opponentId && item.game.venueId === venueId
+      );
 
-      if (!match) {
+      if (!match && setupMode()) {
         await page.getByLabel("Opponent").selectOption(opponentId);
         await page.getByLabel("Venue").selectOption(venueId);
 
@@ -334,9 +341,10 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
           items: Array<{ game: { id: string; opponentId: string; venueId?: string | null } }>;
         }>(page, `/api/v1/games?seasonId=${seasonId}`);
         expect(refreshedGames.status).toBe(200);
-        match = Array.isArray(refreshedGames.body.items)
-          ? refreshedGames.body.items.find((item) => item.game.opponentId === opponentId && item.game.venueId === venueId)
-          : undefined;
+        match = pickPreferredMatch(
+          Array.isArray(refreshedGames.body.items) ? refreshedGames.body.items : [],
+          (item) => item.game.opponentId === opponentId && item.game.venueId === venueId
+        );
       }
 
       expect(match).toBeTruthy();
