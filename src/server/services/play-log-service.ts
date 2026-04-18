@@ -91,6 +91,27 @@ type PlayPenaltyRow = {
   no_play: boolean;
 };
 
+type PlayEventMutationRow = {
+  id: string;
+  game_id: string;
+  sequence: string;
+  client_mutation_id: string | null;
+  quarter: number;
+  clock_seconds: number;
+  possession: "home" | "away";
+  play_type: string;
+  summary: string | null;
+  payload: Record<string, unknown> | null;
+  created_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type GameRevisionRow = {
+  id: string;
+  current_revision: number;
+};
+
 async function bumpGameRevision(tx: DbTransaction, gameId: string) {
   const game = await tx.query.games.findFirst({
     where: eq(games.id, gameId)
@@ -109,18 +130,6 @@ async function bumpGameRevision(tx: DbTransaction, gameId: string) {
     .returning();
 
   return updated[0].currentRevision;
-}
-
-async function currentGameRevision(tx: DbTransaction, gameId: string) {
-  const game = await tx.query.games.findFirst({
-    where: eq(games.id, gameId)
-  });
-
-  if (!game) {
-    throw new Error("Game not found.");
-  }
-
-  return game.currentRevision;
 }
 
 async function assertSequenceAvailable(tx: DbTransaction, gameId: string, sequence: string, excludingPlayId?: string) {
@@ -163,6 +172,24 @@ async function writePlayAudit(
     nextSnapshot: audit.nextSnapshot ?? audit.previousSnapshot,
     changedByUserId: audit.changedByUserId
   });
+}
+
+function mapMutatedPlay(row: PlayEventMutationRow) {
+  return {
+    id: row.id,
+    gameId: row.game_id,
+    sequence: row.sequence,
+    clientMutationId: row.client_mutation_id,
+    quarter: row.quarter,
+    clockSeconds: row.clock_seconds,
+    possession: row.possession,
+    playType: row.play_type as PlayType,
+    summary: row.summary,
+    payload: (row.payload ?? {}) as Record<string, unknown>,
+    createdByUserId: row.created_by_user_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
 }
 
 export async function listPlayEvents(gameId: string) {
@@ -254,110 +281,183 @@ export async function listPlayEvents(gameId: string) {
 export async function createPlayEvent(gameId: string, input: CreatePlayEventInput) {
   await requireGameRole(gameId, "stat_operator");
   const user = await requireAuthenticatedUser();
-  const db = getDb();
+  const supabaseAdmin = createSupabaseAdminClient();
 
-  return db.transaction(async (tx) => {
-    if (input.clientMutationId) {
-      const existing = await tx.query.playEvents.findFirst({
-        where: and(
-          eq(playEvents.gameId, gameId),
-          eq(playEvents.clientMutationId, input.clientMutationId)
-        )
-      });
+  if (input.clientMutationId) {
+    const { data: existing, error: existingError } = await supabaseAdmin
+      .from("play_events")
+      .select(
+        "id,game_id,sequence,client_mutation_id,quarter,clock_seconds,possession,play_type,summary,payload,created_by_user_id,created_at,updated_at"
+      )
+      .eq("game_id", gameId)
+      .eq("client_mutation_id", input.clientMutationId)
+      .maybeSingle<PlayEventMutationRow>();
 
-      if (existing) {
-        return {
-          play: existing,
-          rebuildFromSequence: existing.sequence,
-          revision: await currentGameRevision(tx, gameId),
-          deduped: true
-        };
+    if (existingError) {
+      throw new Error(existingError.message);
+    }
+
+    if (existing) {
+      const { data: gameRevisionRow, error: revisionError } = await supabaseAdmin
+        .from("games")
+        .select("id,current_revision")
+        .eq("id", gameId)
+        .maybeSingle<GameRevisionRow>();
+
+      if (revisionError) {
+        throw new Error(revisionError.message);
       }
+
+      if (!gameRevisionRow) {
+        throw new Error("Game not found.");
+      }
+
+      return {
+        play: mapMutatedPlay(existing),
+        rebuildFromSequence: existing.sequence,
+        revision: gameRevisionRow.current_revision,
+        deduped: true
+      };
     }
+  }
 
-    await assertSequenceAvailable(tx, gameId, input.sequence);
+  const { data: sequenceConflict, error: sequenceError } = await supabaseAdmin
+    .from("play_events")
+    .select("id")
+    .eq("game_id", gameId)
+    .eq("sequence", input.sequence)
+    .maybeSingle<{ id: string }>();
 
-    const inserted = await tx
-      .insert(playEvents)
-      .values({
-        gameId,
-        sequence: input.sequence,
-        clientMutationId: input.clientMutationId,
-        quarter: input.quarter,
-        clockSeconds: input.clockSeconds,
-        possession: input.possession,
-        playType: input.playType,
-        payload: input.payload,
-        summary: input.summary,
-        createdByUserId: user.id
-      })
-      .returning();
+  if (sequenceError) {
+    throw new Error(sequenceError.message);
+  }
 
-    const play = inserted[0];
+  if (sequenceConflict) {
+    throw new Error("Sequence token is already in use for this game.");
+  }
 
-    if (input.participants.length > 0) {
-      await tx.insert(playParticipants).values(
-        input.participants.map((participant) => ({
-          playId: play.id,
-          gameRosterEntryId: participant.gameRosterEntryId,
-          role: participant.role,
-          side: participant.side,
-          creditUnits: participant.creditUnits,
-          statPayload: participant.statPayload
-        }))
-      );
+  const { data: gameRow, error: gameError } = await supabaseAdmin
+    .from("games")
+    .select("id,current_revision")
+    .eq("id", gameId)
+    .maybeSingle<GameRevisionRow>();
+
+  if (gameError) {
+    throw new Error(gameError.message);
+  }
+
+  if (!gameRow) {
+    throw new Error("Game not found.");
+  }
+
+  const { data: insertedPlay, error: insertPlayError } = await supabaseAdmin
+    .from("play_events")
+    .insert({
+      game_id: gameId,
+      sequence: input.sequence,
+      client_mutation_id: input.clientMutationId ?? null,
+      quarter: input.quarter,
+      clock_seconds: input.clockSeconds,
+      possession: input.possession,
+      play_type: input.playType,
+      payload: input.payload,
+      summary: input.summary ?? null,
+      created_by_user_id: user.id
+    })
+    .select(
+      "id,game_id,sequence,client_mutation_id,quarter,clock_seconds,possession,play_type,summary,payload,created_by_user_id,created_at,updated_at"
+    )
+    .single<PlayEventMutationRow>();
+
+  if (insertPlayError) {
+    throw new Error(insertPlayError.message);
+  }
+
+  if (input.participants.length > 0) {
+    const { error: participantsError } = await supabaseAdmin.from("play_participants").insert(
+      input.participants.map((participant) => ({
+        play_id: insertedPlay.id,
+        game_roster_entry_id: participant.gameRosterEntryId ?? null,
+        role: participant.role,
+        side: participant.side,
+        credit_units: participant.creditUnits,
+        stat_payload: participant.statPayload ?? null
+      }))
+    );
+
+    if (participantsError) {
+      throw new Error(participantsError.message);
     }
+  }
 
-    if (input.penalties.length > 0) {
-      await tx.insert(playPenalties).values(
-        input.penalties.map((penalty) => ({
-          playId: play.id,
-          penalizedSide: penalty.penalizedSide,
-          code: penalty.code,
-          yards: penalty.yards,
-          result: penalty.result,
-          enforcementType: penalty.enforcementType,
-          timing: penalty.timing,
-          foulSpot: penalty.foulSpot,
-          automaticFirstDown: penalty.automaticFirstDown,
-          lossOfDown: penalty.lossOfDown,
-          replayDown: penalty.replayDown,
-          noPlay: penalty.noPlay
-        }))
-      );
+  if (input.penalties.length > 0) {
+    const { error: penaltiesError } = await supabaseAdmin.from("play_penalties").insert(
+      input.penalties.map((penalty) => ({
+        play_id: insertedPlay.id,
+        penalized_side: penalty.penalizedSide,
+        code: penalty.code,
+        yards: penalty.yards,
+        result: penalty.result,
+        enforcement_type: penalty.enforcementType,
+        timing: penalty.timing,
+        foul_spot: penalty.foulSpot ?? null,
+        automatic_first_down: penalty.automaticFirstDown,
+        loss_of_down: penalty.lossOfDown,
+        replay_down: penalty.replayDown,
+        no_play: penalty.noPlay
+      }))
+    );
+
+    if (penaltiesError) {
+      throw new Error(penaltiesError.message);
     }
+  }
 
-    await writePlayAudit(tx, {
-      playId: play.id,
+  const { error: auditError } = await supabaseAdmin.from("play_event_audits").insert({
+    play_id: insertedPlay.id,
+    game_id: gameId,
+    action: "created",
+    previous_snapshot: null,
+    next_snapshot: {
+      playId: insertedPlay.id,
       gameId,
-      action: "created",
-      nextSnapshot: {
-        playId: play.id,
-        gameId,
-        sequence: input.sequence,
-        quarter: input.quarter,
-        clockSeconds: input.clockSeconds,
-        possession: input.possession,
-        playType: input.playType,
-        summary: input.summary,
-        payload: input.payload,
-        participants: input.participants,
-        penalties: input.penalties.map((penalty) => ({
-          ...penalty,
-          ...normalizePenaltyFlags(penalty)
-        }))
-      },
-      changedByUserId: user.id
-    });
-
-    const revision = await bumpGameRevision(tx, gameId);
-
-    return {
-      play,
-      rebuildFromSequence: input.sequence,
-      revision
-    };
+      sequence: input.sequence,
+      quarter: input.quarter,
+      clockSeconds: input.clockSeconds,
+      possession: input.possession,
+      playType: input.playType,
+      summary: input.summary,
+      payload: input.payload,
+      participants: input.participants,
+      penalties: input.penalties.map((penalty) => ({
+        ...penalty,
+        ...normalizePenaltyFlags(penalty)
+      }))
+    },
+    changed_by_user_id: user.id
   });
+
+  if (auditError) {
+    throw new Error(auditError.message);
+  }
+
+  const revision = gameRow.current_revision + 1;
+  const { error: revisionUpdateError } = await supabaseAdmin
+    .from("games")
+    .update({
+      current_revision: revision
+    })
+    .eq("id", gameId);
+
+  if (revisionUpdateError) {
+    throw new Error(revisionUpdateError.message);
+  }
+
+  return {
+    play: mapMutatedPlay(insertedPlay),
+    rebuildFromSequence: input.sequence,
+    revision
+  };
 }
 
 export async function updatePlayEvent(gameId: string, input: UpdatePlayEventInput) {
