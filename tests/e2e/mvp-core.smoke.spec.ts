@@ -368,7 +368,7 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
       await page.goto("/games");
       await expect(page.getByRole("heading", { name: "Game schedule" })).toBeVisible();
       await expect(page.getByText(smoke.team.name, { exact: false })).toBeVisible();
-      await expect(page.getByRole("link", { name: "Open game" })).toBeVisible();
+      await expect(page.locator(`a[href="/games/${gameId}/manage"]`)).toBeVisible();
     });
 
     await runStep("GET /api/v1/games/[gameId] returns 200", async () => {
@@ -381,7 +381,7 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
     });
 
     await runStep("open manage", async () => {
-      await page.getByRole("link", { name: "Open game" }).first().click();
+      await page.locator(`a[href="/games/${gameId}/manage"]`).click();
       await page.waitForURL(new RegExp(`/games/${gameId}/manage$`));
       await expect(page.getByRole("heading", { name: /Game admin/i })).toBeVisible();
     });
