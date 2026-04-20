@@ -51,6 +51,8 @@ type Props = {
   disabled?: boolean;
   submitting?: boolean;
   compactMode?: boolean;
+  storageKey?: string;
+  viewerMode?: boolean;
   onSubmit: (submission: PlaySubmission) => Promise<void>;
   onCancelIntent: () => void;
 };
@@ -194,6 +196,46 @@ const playOptionsByPhase = {
   kickoff: ["kickoff", "penalty"]
 } as const;
 
+const defensiveFieldKeys = new Set<FocusField>(["defense", "defenseTwo", "defenseThree", "takeaway", "forced", "recovery"]);
+
+function playTypeLabel(playType: PlayType) {
+  switch (playType) {
+    case "field_goal":
+      return "Field Goal";
+    case "extra_point":
+    case "two_point_try":
+      return "PAT / 2PT";
+    default:
+      return playType.replaceAll("_", " ").replace(/\b\w/g, (character) => character.toUpperCase());
+  }
+}
+
+function playTypeDescription(playType: PlayType) {
+  switch (playType) {
+    case "run":
+      return "Number-first rushing entry with quick outcome toggles.";
+    case "pass":
+      return "Passer, target, and result first. Extra fields appear only when needed.";
+    case "sack":
+      return "Quarterback, loss, and rush credit without leaving the live screen.";
+    case "punt":
+      return "Punter, distance, result, and return in one compact block.";
+    case "kickoff":
+      return "Kick result first, then return detail only if the ball comes back.";
+    case "field_goal":
+      return "Kick attempt, distance, and made / missed / blocked result.";
+    case "extra_point":
+    case "two_point_try":
+      return "Try-phase entry with only the fields this conversion needs.";
+    case "turnover":
+      return "Recovering side, returner, and touchdown toggle.";
+    case "penalty":
+      return "Penalty-only entry with acceptance and enforcement controls.";
+    default:
+      return "Live entry panel for the current snap.";
+  }
+}
+
 function setFieldValue<K extends keyof FormState>(current: FormState, key: K, value: FormState[K]) {
   return {
     ...current,
@@ -234,6 +276,45 @@ function findRecentParticipantNumber(
   return undefined;
 }
 
+function findRecentParticipantNumbers(
+  snapshot: GameDaySnapshot,
+  side: TeamSide,
+  acceptedRoles: string[],
+  limit = 3
+) {
+  const accepted = roleOrder(acceptedRoles);
+  const rosterIndex = new Map(
+    snapshot.rosters[side].map((entry) => [entry.id, entry.jerseyNumber])
+  );
+  const seen = new Set<string>();
+  const values: string[] = [];
+
+  for (const item of snapshot.recentPlays) {
+    for (const participant of item.play.participants) {
+      if (participant.side !== side || !accepted.has(participant.role)) {
+        continue;
+      }
+
+      const jerseyNumber = participant.gameRosterEntryId
+        ? rosterIndex.get(participant.gameRosterEntryId)
+        : undefined;
+
+      if (!jerseyNumber || seen.has(jerseyNumber)) {
+        continue;
+      }
+
+      seen.add(jerseyNumber);
+      values.push(jerseyNumber);
+
+      if (values.length >= limit) {
+        return values;
+      }
+    }
+  }
+
+  return values;
+}
+
 function findRecentPayloadNumber(
   snapshot: GameDaySnapshot,
   side: TeamSide,
@@ -252,6 +333,88 @@ function findRecentPayloadNumber(
   }
 
   return undefined;
+}
+
+function autofillDefenseFields(
+  snapshot: GameDaySnapshot,
+  form: FormState,
+  showAdvancedParticipantCapture: boolean
+) {
+  const offense = form.possession;
+  const defense = offense === "home" ? "away" : "home";
+  const next = { ...form };
+
+  const tackles = findRecentParticipantNumbers(snapshot, defense, ["solo_tackle", "assist_tackle"], 3);
+  const sacks = findRecentParticipantNumbers(snapshot, defense, ["sack_credit"], 2);
+  const interceptions = findRecentParticipantNumbers(snapshot, defense, ["interceptor"], 1);
+  const passBreakups = findRecentParticipantNumbers(snapshot, defense, ["pass_breakup"], 1);
+  const forced = findRecentParticipantNumbers(snapshot, defense, ["forced_fumble"], 1);
+  const recoveries = findRecentParticipantNumbers(snapshot, defense, ["fumble_recovery"], 1);
+  const blocks = findRecentParticipantNumbers(snapshot, defense, ["block_credit"], 1);
+  const returners = findRecentParticipantNumbers(snapshot, defense, ["returner"], 1);
+
+  if (form.playType === "run") {
+    next.defense = tackles[0] ?? next.defense;
+    if (showAdvancedParticipantCapture) {
+      next.defenseTwo = tackles[1] ?? next.defenseTwo;
+      next.defenseThree = tackles[2] ?? next.defenseThree;
+    }
+    if (form.fumble) next.forced = forced[0] ?? next.forced;
+    if (form.fumbleLost) next.recovery = recoveries[0] ?? next.recovery;
+    return next;
+  }
+
+  if (form.playType === "pass") {
+    if (form.passResult === "complete") {
+      next.defense = tackles[0] ?? next.defense;
+      if (showAdvancedParticipantCapture) {
+        next.defenseTwo = tackles[1] ?? next.defenseTwo;
+        next.defenseThree = tackles[2] ?? next.defenseThree;
+      }
+    } else if (form.passResult === "incomplete") {
+      next.takeaway = passBreakups[0] ?? next.takeaway;
+    } else {
+      next.takeaway = interceptions[0] ?? next.takeaway;
+      next.returner = returners[0] ?? (next.returner || next.takeaway);
+    }
+    return next;
+  }
+
+  if (form.playType === "sack") {
+    next.defense = sacks[0] ?? next.defense;
+    if (showAdvancedParticipantCapture) {
+      next.defenseTwo = sacks[1] ?? next.defenseTwo;
+    }
+    if (form.fumble) next.forced = forced[0] ?? next.forced;
+    if (form.fumbleLost) next.recovery = recoveries[0] ?? next.recovery;
+    return next;
+  }
+
+  if (form.playType === "punt" || form.playType === "kickoff") {
+    next.returner = returners[0] ?? next.returner;
+    return next;
+  }
+
+  if (form.playType === "field_goal" || form.playType === "extra_point") {
+    next.takeaway = blocks[0] ?? next.takeaway;
+    return next;
+  }
+
+  if (form.playType === "turnover") {
+    if (form.turnoverKind === "interception_return") {
+      next.takeaway = interceptions[0] ?? next.takeaway;
+      next.returner = returners[0] ?? (next.returner || next.takeaway);
+    } else if (form.turnoverKind === "fumble_return") {
+      next.forced = forced[0] ?? next.forced;
+      next.recovery = recoveries[0] ?? next.recovery;
+      next.returner = returners[0] ?? (next.returner || next.recovery);
+    } else {
+      next.takeaway = blocks[0] ?? next.takeaway;
+      next.returner = returners[0] ?? next.returner;
+    }
+  }
+
+  return next;
 }
 
 function buildLikelyPicks(snapshot: GameDaySnapshot, form: FormState): LikelyPick[] {
@@ -729,17 +892,17 @@ function buildParticipantFields(form: FormState, showAdvancedParticipantCapture:
   if (form.playType === "run") {
     if (!showAdvancedParticipantCapture) {
       return [
-        field("jerseyA", "Ball carrier", offense, "Runner"),
-        field("defense", "Primary tackler", defense, "Solo or lead credit"),
+        field("jerseyA", "Runner", offense, "Ball carrier"),
+        field("defense", "Solo / lead tackle", defense, "Primary tackle"),
         ...(form.fumbleLost ? [field("recovery", "Recovery", defense, "Who got it?")] : [])
       ];
     }
 
     return [
-      field("jerseyA", "Ball carrier", offense, "Runner"),
-      field("defense", "Tackler 1", defense, "Solo if only one"),
-      field("defenseTwo", "Tackler 2", defense, "Assist"),
-      field("defenseThree", "Tackler 3", defense, "Assist"),
+      field("jerseyA", "Runner", offense, "Ball carrier"),
+      field("defense", "Solo / lead tackle", defense, "Use if only one"),
+      field("defenseTwo", "Assist 1", defense, "Assist"),
+      field("defenseThree", "Assist 2", defense, "Assist"),
       ...(form.fumble ? [field("forced", "Forced fumble", defense, "Who punched it out?")] : []),
       ...(form.fumbleLost ? [field("recovery", "Recovery", defense, "Who got it?")] : [])
     ];
@@ -748,10 +911,10 @@ function buildParticipantFields(form: FormState, showAdvancedParticipantCapture:
   if (form.playType === "pass") {
     if (!showAdvancedParticipantCapture) {
       return [
-        field("jerseyA", "Passer", offense, "QB"),
-        field("jerseyB", "Target", offense, "Receiver"),
+        field("jerseyA", "Quarterback", offense, "QB"),
+        field("jerseyB", "Intended for", offense, "Receiver"),
         ...(form.passResult === "complete"
-          ? [field("defense", "Primary tackler", defense, "Solo or lead credit")]
+          ? [field("defense", "Solo / lead tackle", defense, "Primary tackle")]
           : form.passResult === "interception"
             ? [field("takeaway", "Interceptor", defense, "Takeaway")]
             : [])
@@ -759,13 +922,13 @@ function buildParticipantFields(form: FormState, showAdvancedParticipantCapture:
     }
 
     return [
-      field("jerseyA", "Passer", offense, "QB"),
-      field("jerseyB", "Target", offense, "Receiver"),
+      field("jerseyA", "Quarterback", offense, "QB"),
+      field("jerseyB", "Intended for", offense, "Receiver"),
       ...(form.passResult === "complete"
         ? [
-            field("defense", "Tackler 1", defense, "Solo if only one"),
-            field("defenseTwo", "Tackler 2", defense, "Assist"),
-            field("defenseThree", "Tackler 3", defense, "Assist")
+            field("defense", "Solo / lead tackle", defense, "Use if only one"),
+            field("defenseTwo", "Assist 1", defense, "Assist"),
+            field("defenseThree", "Assist 2", defense, "Assist")
           ]
         : form.passResult === "incomplete"
           ? [field("takeaway", "Pass breakup", defense, "PBU")]
@@ -881,28 +1044,67 @@ function validateSubmission(form: FormState) {
   return null;
 }
 
-export function PlayEntryPanel({ snapshot, intent, disabled, submitting, compactMode, onSubmit, onCancelIntent }: Props) {
+function formatDownLabel(down: number) {
+  if (down === 1) return "1st";
+  if (down === 2) return "2nd";
+  if (down === 3) return "3rd";
+  return `${down}th`;
+}
+
+function possessionLabel(side: TeamSide) {
+  return side === "home" ? "H (Home)" : "V (Visitor)";
+}
+
+export function PlayEntryPanel({
+  snapshot,
+  intent,
+  disabled,
+  submitting,
+  compactMode,
+  storageKey = "game-day-play-entry-collapsed",
+  viewerMode = false,
+  onSubmit,
+  onCancelIntent
+}: Props) {
   const showAdvancedParticipantCapture = isFeatureEnabled("advanced_participant_capture");
   const [form, setForm] = useState<FormState>(() => createForm(snapshot));
   const [focusedField, setFocusedField] = useState<FocusField>("jerseyA");
   const [formError, setFormError] = useState<string | null>(null);
+  const [entryCollapsed, setEntryCollapsed] = useState(false);
   const participantFields = useMemo(
     () => buildParticipantFields(form, showAdvancedParticipantCapture),
     [form, showAdvancedParticipantCapture]
+  );
+  const primaryParticipantFields = useMemo(
+    () => participantFields.filter((field) => !defensiveFieldKeys.has(field.key)),
+    [participantFields]
+  );
+  const defensiveParticipantFields = useMemo(
+    () => participantFields.filter((field) => defensiveFieldKeys.has(field.key)),
+    [participantFields]
   );
   const quickOffense = useMemo(() => snapshot.rosters[form.possession].slice(0, 14), [snapshot.rosters, form.possession]);
   const quickDefense = useMemo(
     () => snapshot.rosters[form.possession === "home" ? "away" : "home"].slice(0, 14),
     [snapshot.rosters, form.possession]
   );
-  const likelyPicks = useMemo(
-    () => (showAdvancedParticipantCapture ? buildLikelyPicks(snapshot, form) : []),
-    [form, showAdvancedParticipantCapture, snapshot]
-  );
-  const playPresets = useMemo(() => buildPlayPresets(snapshot, form), [snapshot, form]);
   const penaltyPresets = useMemo(() => buildPenaltyPresets(form), [form]);
-  const nextPlaySuggestions = useMemo(() => buildNextPlaySuggestions(snapshot, form), [snapshot, form]);
-  const pressureLabels = useMemo(() => buildPressureLabels(snapshot), [snapshot]);
+  const currentPlayLabel = playTypeLabel(form.playType);
+
+  useEffect(() => {
+    try {
+      const savedValue = window.sessionStorage.getItem(storageKey);
+      if (savedValue === "1") {
+        setEntryCollapsed(true);
+      }
+    } catch {}
+  }, [storageKey]);
+
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(storageKey, entryCollapsed ? "1" : "0");
+    } catch {}
+  }, [entryCollapsed, storageKey]);
 
   useEffect(() => {
     if (participantFields.length === 0) {
@@ -994,6 +1196,12 @@ export function PlayEntryPanel({ snapshot, intent, disabled, submitting, compact
     setFormError(null);
   }, [intent, snapshot]);
 
+  useEffect(() => {
+    if (intent.kind !== "append") {
+      setEntryCollapsed(false);
+    }
+  }, [intent.kind]);
+
   const sequence = intent.kind === "edit" ? intent.play.sequence : intent.kind === "insert" ? midpointSequence(intent.beforePlay.previousSequence, intent.beforePlay.sequence) : midpointSequence(snapshot.recentPlays[0]?.sequence, undefined);
   const showRunFields = form.playType === "run";
   const showPassFields = form.playType === "pass";
@@ -1005,6 +1213,25 @@ export function PlayEntryPanel({ snapshot, intent, disabled, submitting, compact
   const showTurnoverFields = form.playType === "turnover";
   const showPenaltyOnlyFields = form.playType === "penalty";
   const activeFieldLabel = participantFields.find((field) => field.key === focusedField)?.label ?? "Participant";
+  const primarySectionTitle =
+    showRunFields ? "6. Runner" :
+    showPassFields ? "6. Quarterback and intended target" :
+    showSackFields ? "6. Quarterback and rush credit" :
+    showPuntFields ? "6. Punter and returner" :
+    showKickoffFields ? "6. Kicker and returner" :
+    showKickTryFields ? "6. Kicker" :
+    showTwoPointFields ? "6. Conversion players" :
+    showTurnoverFields ? "6. Takeaway players" :
+    "6. Player input";
+  const primarySectionCopy =
+    showRunFields ? "Enter the runner first, then yards gained or lost." :
+    showPassFields ? "Quarterback first, then intended target, then result." :
+    showSackFields ? "Quarterback first, then sack or strip credit." :
+    showPuntFields || showKickoffFields ? "Special teams entry stays number-first." :
+    showKickTryFields ? "Enter the kicker, then the kick result." :
+    showTwoPointFields ? "Log the conversion players before the result." :
+    showTurnoverFields ? "Capture the takeaway player and returner if needed." :
+    "Tap a role, then use quick chips or type the jersey number.";
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setFormError(null);
@@ -1018,6 +1245,11 @@ export function PlayEntryPanel({ snapshot, intent, disabled, submitting, compact
   function addQuick(jerseyNumber: string) {
     setFormError(null);
     setForm((current) => ({ ...current, [focusedField]: jerseyNumber }));
+  }
+
+  function autoFillDefense() {
+    setFormError(null);
+    setForm((current) => autofillDefenseFields(snapshot, current, showAdvancedParticipantCapture));
   }
 
   async function submit() {
@@ -1132,75 +1364,101 @@ export function PlayEntryPanel({ snapshot, intent, disabled, submitting, compact
     });
   }
 
+  function renderParticipantField(field: ParticipantField) {
+    return (
+      <label
+        className={focusedField === field.key ? "field participant-field-card active" : "field participant-field-card"}
+        key={field.key}
+      >
+        <span>{field.label}</span>
+        <input
+          value={form[field.key]}
+          placeholder={field.hint ?? field.label}
+          inputMode="numeric"
+          maxLength={3}
+          className="participant-number-input"
+          onFocus={() => setFocusedField(field.key)}
+          onChange={(event) => set(field.key, event.target.value)}
+        />
+        <small>{field.team === form.possession ? "offense" : "defense"}</small>
+      </label>
+    );
+  }
+
   return (
-    <section className="section-card pad-lg stack-md">
+    <section className="section-card pad-lg stack-md play-entry-shell" data-testid="play-entry-shell">
       <div className="entry-header">
         <div>
-          <div className="eyebrow" style={{ background: "rgba(19, 34, 27, 0.08)", color: "#2f4338" }}>Live entry</div>
+          <div className="eyebrow play-entry-eyebrow">Live entry</div>
           <h2 style={{ margin: "10px 0 0" }}>Play Entry</h2>
           <p className="kicker">{intent.kind === "edit" ? `Editing ${intent.play.sequence}` : intent.kind === "insert" ? `Insert before ${intent.beforePlay.sequence}` : "Append next play"} at sequence {sequence}.</p>
         </div>
-        {intent.kind !== "append" ? <button className="button-secondary button-secondary-light" type="button" onClick={onCancelIntent}>Cancel</button> : null}
+        {!viewerMode ? (
+          <div className="timeline-actions">
+            {intent.kind !== "append" ? <button className="button-secondary button-secondary-light" type="button" onClick={onCancelIntent}>Cancel</button> : null}
+            <button className="button-secondary button-secondary-light" data-testid="play-entry-toggle" type="button" onClick={() => setEntryCollapsed((current) => !current)}>
+              {entryCollapsed ? "Open entry" : "Collapse entry"}
+            </button>
+          </div>
+        ) : null}
       </div>
 
-      <div className="tab-row">
-        {playOptionsByPhase[snapshot.currentState.phase].map((option) => (
-          <button key={option} className={option === form.playType ? "tab-button active" : "tab-button"} type="button" onClick={() => set("playType", option)}>
-            {option.replaceAll("_", " ")}
-          </button>
-        ))}
-      </div>
+      {viewerMode ? (
+        <section className="collapsed-entry-card stack-md play-entry-viewer-state" data-testid="play-entry-viewer-state">
+          <div className="entry-header">
+            <div className="stack-sm">
+              <strong>Viewer mode</strong>
+              <p className="kicker" style={{ margin: 0 }}>
+                Another writer is active. Review live state and recent plays, or use Try writer lease to take control.
+              </p>
+            </div>
+            <span className="chip">Live review</span>
+          </div>
+        </section>
+      ) : entryCollapsed ? (
+        <section className="collapsed-entry-card stack-md" data-testid="play-entry-collapsed">
+          <div className="entry-header">
+            <div className="stack-sm">
+              <strong>{currentPlayLabel}</strong>
+              <p className="kicker" style={{ margin: 0 }}>
+                {disabled ? "Writer lease required before this device can submit plays." : submitting ? "Play is currently submitting." : intent.kind === "edit" ? "Editing the selected play." : intent.kind === "insert" ? "Insert mode is ready." : "Ready for the next snap."}
+              </p>
+            </div>
+            <span className="chip">{form.possession === "home" ? "H" : "V"} | Q{form.quarter}</span>
+          </div>
+          <div className="timeline-actions">
+            <button className="button-primary" type="button" onClick={() => setEntryCollapsed(false)}>Open play entry</button>
+          </div>
+        </section>
+      ) : (
+        <>
 
-      {!compactMode && playPresets.length > 0 ? (
-        <div className="stack-sm">
-          <strong>Common situations</strong>
-          <div className="pill-row">
-            {playPresets.map((preset) => (
+        <section className="play-entry-command-deck">
+          <div className="stack-sm play-entry-stage play-entry-stage-primary">
+            <div className="entry-header">
+              <div>
+                <strong>Play type</strong>
+                <p className="kicker" style={{ margin: 0 }}>{playTypeDescription(form.playType)}</p>
+              </div>
+              <span className="chip play-entry-sequence-chip">Seq {sequence}</span>
+            </div>
+            <div className="tab-row play-type-grid" data-testid="play-type-selector">
+            {playOptionsByPhase[snapshot.currentState.phase].map((option) => (
               <button
-                className="chip-button chip-button-strong"
-                key={preset.key}
+                key={option}
+                className={option === form.playType ? "tab-button active play-type-button" : "tab-button play-type-button"}
                 type="button"
-                onClick={() => setForm((current) => preset.apply(current))}
+                onClick={() => set("playType", option)}
               >
-                {preset.label}
+                {playTypeLabel(option)}
               </button>
             ))}
           </div>
         </div>
-      ) : null}
 
-      {nextPlaySuggestions.length > 0 ? (
-        <div className="stack-sm">
-          <strong>Suggested next calls</strong>
-          <div className="pill-row">
-            {nextPlaySuggestions.map((preset) => (
-              <button
-                className="chip-button"
-                key={preset.key}
-                type="button"
-                onClick={() => setForm((current) => preset.apply(current))}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
+      </section>
 
-      {pressureLabels.length > 0 ? (
-        <div className="stack-sm">
-          <strong>{compactMode ? "Right now" : "Pressure cues"}</strong>
-          <div className="pill-row">
-            {pressureLabels.map((label) => (
-              <span className="chip" key={label}>
-                {label}
-              </span>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {disabled ? (
+      {disabled && !viewerMode ? (
         <div className="kicker">
           A writer lease is required before live plays can be submitted. Reacquire the lease or return when this device is the active stat writer.
         </div>
@@ -1208,157 +1466,161 @@ export function PlayEntryPanel({ snapshot, intent, disabled, submitting, compact
 
       {formError ? <div className="error-note">{formError}</div> : null}
 
-      <div className="form-grid">
-        <label className="field"><span>Quarter</span><select value={form.quarter} onChange={(event) => set("quarter", Number(event.target.value) as FormState["quarter"])}>{[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>Q{value}</option>)}</select></label>
-        <label className="field"><span>Clock</span><input value={form.clock} onChange={(event) => set("clock", event.target.value)} /></label>
-        <label className="field"><span>Possession</span><select value={form.possession} onChange={(event) => set("possession", event.target.value as TeamSide)}><option value="home">Home</option><option value="away">Away</option></select></label>
-        {!compactMode ? <label className="field field-span-2"><span>Summary override</span><input value={form.summary} onChange={(event) => set("summary", event.target.value)} /></label> : null}
-      </div>
-
-      {participantFields.length > 0 ? (
-        <div className="participant-layout">
-          <div className="participant-panel stack-md">
-            <div className="entry-header">
-              <div>
-                <strong>Participant capture</strong>
-                <p className="kicker" style={{ margin: "6px 0 0" }}>
-                  Tap a role, then use the quick chips or type the jersey number directly.
-                </p>
-              </div>
-              <span className="participant-focus-pill">Active role: {activeFieldLabel}</span>
-            </div>
-            <div className="participant-field-grid">
-              {participantFields.map((field) => (
-                <label
-                  className={focusedField === field.key ? "field participant-field-card active" : "field participant-field-card"}
-                  key={field.key}
-                >
-                  <span>{field.label}</span>
-                  <input
-                    value={form[field.key]}
-                    placeholder={field.hint ?? field.label}
-                    onFocus={() => setFocusedField(field.key)}
-                    onChange={(event) => set(field.key, event.target.value)}
-                  />
-                  <small>{field.team === form.possession ? "offense" : "defense"}</small>
-                </label>
-              ))}
+      {primaryParticipantFields.length > 0 ? (
+        <section className="play-entry-primary-block stack-md" data-testid="play-entry-primary-block">
+          <div className="entry-header play-entry-role-header">
+            <div>
+              <strong>{primarySectionTitle}</strong>
+              <p className="kicker" style={{ margin: "6px 0 0" }}>
+                {primarySectionCopy}
+              </p>
             </div>
           </div>
-
-          <div className="player-bank participant-bank-panel">
-            {likelyPicks.length > 0 ? (
-              <div className="stack-sm">
-                <strong>Likely now</strong>
+          <div className="play-entry-primary-grid">
+            <section className="participant-panel stack-md play-entry-role-panel">
+              <div className="participant-field-grid play-entry-role-grid">
+                {primaryParticipantFields.map(renderParticipantField)}
+              </div>
+              <div className="player-bank play-entry-quick-bank">
+                <strong>Recent offense</strong>
                 <div className="pill-row">
-                  {likelyPicks.map((pick) => (
-                    <button
-                      className="chip-button chip-button-strong"
-                      key={pick.key}
-                      type="button"
-                      onClick={() => setForm((current) => pick.apply(current))}
-                    >
-                      {pick.label}
+                  {quickOffense.slice(0, 6).map((entry) => (
+                    <button className="chip-button" key={entry.id} type="button" onClick={() => addQuick(entry.jerseyNumber)}>
+                      #{entry.jerseyNumber} {entry.displayName}
                     </button>
                   ))}
                 </div>
               </div>
-            ) : null}
-            <div className="stack-sm">
-              <strong>Quick offense</strong>
-              <div className="pill-row">
-                {quickOffense.map((entry) => (
-                  <button className="chip-button" key={entry.id} type="button" onClick={() => addQuick(entry.jerseyNumber)}>
-                    #{entry.jerseyNumber} {entry.displayName}
-                  </button>
-                ))}
+            </section>
+
+            <section className="play-entry-results-shell stack-sm">
+              <div className="entry-header">
+                <strong>Result and yardage</strong>
+                <span className="chip">Primary result</span>
               </div>
-            </div>
-            <div className="stack-sm">
-              <strong>Quick defense</strong>
-              <div className="pill-row">
-                {quickDefense.map((entry) => (
-                  <button className="chip-button" key={entry.id} type="button" onClick={() => addQuick(entry.jerseyNumber)}>
-                    #{entry.jerseyNumber} {entry.displayName}
-                  </button>
-                ))}
+
+              <div className="form-grid play-entry-detail-grid">
+                {showRunFields ? <label className="field"><span>Yards gained / lost</span><input value={form.yards} onChange={(event) => set("yards", event.target.value)} /></label> : null}
+                {showPassFields ? <label className="field"><span>Yards gained / lost</span><input value={form.yards} onChange={(event) => set("yards", event.target.value)} /></label> : null}
+                {showSackFields ? <label className="field"><span>Yards lost</span><input value={form.yardsLost} onChange={(event) => set("yardsLost", event.target.value)} /></label> : null}
+                {showPuntFields || showKickoffFields || form.playType === "field_goal" ? <label className="field"><span>{form.playType === "field_goal" ? "Kick distance" : "Kick / punt yards"}</span><input value={form.kickDistance} onChange={(event) => set("kickDistance", event.target.value)} /></label> : null}
+                {showPuntFields || showKickoffFields || showTurnoverFields ? <label className="field"><span>Return yards</span><input value={form.returnYards} onChange={(event) => set("returnYards", event.target.value)} /></label> : null}
+                {showRunFields ? <label className="field"><span>Run style</span><select value={form.runKind} onChange={(event) => set("runKind", event.target.value as FormState["runKind"])}><option value="designed">Designed</option><option value="scramble">Scramble</option><option value="quarterback_keep">QB keep</option><option value="reverse">Reverse</option></select></label> : null}
+                {showPassFields ? <label className="field"><span>Pass result</span><select value={form.passResult} onChange={(event) => set("passResult", event.target.value as FormState["passResult"])}><option value="complete">Complete</option><option value="incomplete">Incomplete</option><option value="interception">Interception</option></select></label> : null}
+                {showKickTryFields ? <label className="field"><span>Kick result</span><select value={form.kickResult} onChange={(event) => set("kickResult", event.target.value as FormState["kickResult"])}><option value="good">Good</option><option value="no_good">No good</option><option value="blocked">Blocked</option></select></label> : null}
+                {showPuntFields || showKickoffFields ? <label className="field"><span>Return result</span><select value={form.returnResult} onChange={(event) => set("returnResult", event.target.value as FormState["returnResult"])}><option value="returned">Returned</option><option value="touchback">Touchback</option><option value="fair_catch">Fair catch</option><option value="out_of_bounds">Out of bounds</option><option value="downed">Downed</option></select></label> : null}
+                {showTwoPointFields ? <label className="field"><span>2-pt style</span><select value={form.twoPointStyle} onChange={(event) => set("twoPointStyle", event.target.value as FormState["twoPointStyle"])}><option value="run">Run</option><option value="pass">Pass</option></select></label> : null}
+                {showTwoPointFields ? <label className="field"><span>2-pt result</span><select value={form.twoPointResult} onChange={(event) => set("twoPointResult", event.target.value as FormState["twoPointResult"])}><option value="good">Good</option><option value="failed">Failed</option><option value="turnover">Turnover</option></select></label> : null}
+                {showTurnoverFields ? <label className="field"><span>Turnover kind</span><select value={form.turnoverKind} onChange={(event) => set("turnoverKind", event.target.value as FormState["turnoverKind"])}><option value="interception_return">Interception</option><option value="fumble_return">Fumble return</option><option value="blocked_kick_return">Blocked kick</option></select></label> : null}
+                {showRunFields || showPassFields || showTurnoverFields || showSackFields || showPenaltyOnlyFields ? (
+                  <div className="play-entry-toggle-grid field-span-2">
+                    {showRunFields || showPassFields ? <label className="checkbox-field"><input type="checkbox" checked={form.firstDown} onChange={(event) => set("firstDown", event.target.checked)} />First down</label> : null}
+                    {showRunFields || showPassFields || showTurnoverFields ? <label className="checkbox-field"><input type="checkbox" checked={form.touchdown} onChange={(event) => set("touchdown", event.target.checked)} />Touchdown</label> : null}
+                    {showRunFields || showSackFields ? <label className="checkbox-field"><input type="checkbox" checked={form.fumble} onChange={(event) => set("fumble", event.target.checked)} />Fumble</label> : null}
+                    {showRunFields || showSackFields ? <label className="checkbox-field"><input type="checkbox" checked={form.fumbleLost} onChange={(event) => set("fumbleLost", event.target.checked)} />Lost fumble</label> : null}
+                    {showPenaltyOnlyFields ? <label className="checkbox-field"><input type="checkbox" checked={form.liveBallPenaltyOnly} onChange={(event) => set("liveBallPenaltyOnly", event.target.checked)} />Live-ball penalty play</label> : null}
+                  </div>
+                ) : null}
+                <label className="field field-span-2">
+                  <span>Summary override</span>
+                  <input value={form.summary} onChange={(event) => set("summary", event.target.value)} />
+                </label>
               </div>
-            </div>
+            </section>
           </div>
-        </div>
+        </section>
       ) : null}
 
-      <div className="form-grid">
-
-        {showRunFields ? <label className="field"><span>Yards</span><input value={form.yards} onChange={(event) => set("yards", event.target.value)} /></label> : null}
-        {showPassFields ? <label className="field"><span>Yards</span><input value={form.yards} onChange={(event) => set("yards", event.target.value)} /></label> : null}
-        {showSackFields ? <label className="field"><span>Yards lost</span><input value={form.yardsLost} onChange={(event) => set("yardsLost", event.target.value)} /></label> : null}
-        {showPuntFields || showKickoffFields || form.playType === "field_goal" ? <label className="field"><span>{form.playType === "field_goal" ? "Kick distance" : "Kick / punt yards"}</span><input value={form.kickDistance} onChange={(event) => set("kickDistance", event.target.value)} /></label> : null}
-        {showPuntFields || showKickoffFields || showTurnoverFields ? <label className="field"><span>Return yards</span><input value={form.returnYards} onChange={(event) => set("returnYards", event.target.value)} /></label> : null}
-
-        {showRunFields ? <label className="field"><span>Run style</span><select value={form.runKind} onChange={(event) => set("runKind", event.target.value as FormState["runKind"])}><option value="designed">Designed</option><option value="scramble">Scramble</option><option value="quarterback_keep">QB keep</option><option value="reverse">Reverse</option></select></label> : null}
-        {showPassFields ? <label className="field"><span>Pass result</span><select value={form.passResult} onChange={(event) => set("passResult", event.target.value as FormState["passResult"])}><option value="complete">Complete</option><option value="incomplete">Incomplete</option><option value="interception">Interception</option></select></label> : null}
-        {showKickTryFields ? <label className="field"><span>Kick result</span><select value={form.kickResult} onChange={(event) => set("kickResult", event.target.value as FormState["kickResult"])}><option value="good">Good</option><option value="no_good">No good</option><option value="blocked">Blocked</option></select></label> : null}
-        {showPuntFields || showKickoffFields ? <label className="field"><span>Return result</span><select value={form.returnResult} onChange={(event) => set("returnResult", event.target.value as FormState["returnResult"])}><option value="returned">Returned</option><option value="touchback">Touchback</option><option value="fair_catch">Fair catch</option><option value="out_of_bounds">Out of bounds</option><option value="downed">Downed</option></select></label> : null}
-        {showTwoPointFields ? <label className="field"><span>2-pt style</span><select value={form.twoPointStyle} onChange={(event) => set("twoPointStyle", event.target.value as FormState["twoPointStyle"])}><option value="run">Run</option><option value="pass">Pass</option></select></label> : null}
-        {showTwoPointFields ? <label className="field"><span>2-pt result</span><select value={form.twoPointResult} onChange={(event) => set("twoPointResult", event.target.value as FormState["twoPointResult"])}><option value="good">Good</option><option value="failed">Failed</option><option value="turnover">Turnover</option></select></label> : null}
-        {showTurnoverFields ? <label className="field"><span>Turnover kind</span><select value={form.turnoverKind} onChange={(event) => set("turnoverKind", event.target.value as FormState["turnoverKind"])}><option value="interception_return">Interception</option><option value="fumble_return">Fumble return</option><option value="blocked_kick_return">Blocked kick</option></select></label> : null}
-
-        {showRunFields || showPassFields ? <label className="checkbox-field"><input type="checkbox" checked={form.firstDown} onChange={(event) => set("firstDown", event.target.checked)} />First down</label> : null}
-        {showRunFields || showPassFields || showTurnoverFields ? <label className="checkbox-field"><input type="checkbox" checked={form.touchdown} onChange={(event) => set("touchdown", event.target.checked)} />Touchdown</label> : null}
-        {showRunFields || showSackFields ? <label className="checkbox-field"><input type="checkbox" checked={form.fumble} onChange={(event) => set("fumble", event.target.checked)} />Fumble</label> : null}
-        {showRunFields || showSackFields ? <label className="checkbox-field"><input type="checkbox" checked={form.fumbleLost} onChange={(event) => set("fumbleLost", event.target.checked)} />Lost fumble</label> : null}
-        {showPenaltyOnlyFields ? <label className="checkbox-field"><input type="checkbox" checked={form.liveBallPenaltyOnly} onChange={(event) => set("liveBallPenaltyOnly", event.target.checked)} />Live-ball penalty play</label> : null}
-      </div>
-
-      <div className="entry-header">
-        <strong>Penalty overlay</strong>
-        <button className="button-secondary button-secondary-light" type="button" onClick={() => set("penalties", [...form.penalties, penaltyDefaults(form.possession)])}>Add penalty</button>
-      </div>
-      <div className="pill-row">
-        {penaltyPresets.map((preset) => (
-          <button
-            className="chip-button"
-            key={preset.key}
-            type="button"
-            onClick={() => setForm((current) => preset.apply(current))}
-          >
-            {preset.label}
-          </button>
-        ))}
-      </div>
-      {form.penalties.map((item) => (
-        <div className="penalty-card" key={item.id}>
-          <div className="form-grid">
-            <label className="field"><span>On</span><select value={item.penalizedSide} onChange={(event) => set("penalties", form.penalties.map((entry) => entry.id === item.id ? { ...entry, penalizedSide: event.target.value as TeamSide } : entry))}><option value="home">Home</option><option value="away">Away</option></select></label>
-            <label className="field"><span>Code</span><input value={item.code} onChange={(event) => set("penalties", form.penalties.map((entry) => entry.id === item.id ? { ...entry, code: event.target.value } : entry))} /></label>
-            <label className="field"><span>Yards</span><input value={item.yards} onChange={(event) => set("penalties", form.penalties.map((entry) => entry.id === item.id ? { ...entry, yards: event.target.value } : entry))} /></label>
-            <label className="field"><span>Result</span><select value={item.result} onChange={(event) => set("penalties", form.penalties.map((entry) => entry.id === item.id ? { ...entry, result: event.target.value as PenaltyDraft["result"] } : entry))}><option value="accepted">Accepted</option><option value="declined">Declined</option><option value="offsetting">Offsetting</option></select></label>
-            <label className="field"><span>Enforcement</span><select value={item.enforcementType} onChange={(event) => set("penalties", form.penalties.map((entry) => entry.id === item.id ? { ...entry, enforcementType: event.target.value as PenaltyDraft["enforcementType"] } : entry))}><option value="previous_spot">Previous</option><option value="spot">Spot</option><option value="dead_ball">Dead ball</option><option value="succeeding_spot">Succeeding</option></select></label>
-            <label className="field"><span>Timing</span><select value={item.timing} onChange={(event) => set("penalties", form.penalties.map((entry) => entry.id === item.id ? { ...entry, timing: event.target.value as PenaltyDraft["timing"] } : entry))}><option value="live_ball">Live ball</option><option value="dead_ball">Dead ball</option><option value="post_possession">Post-possession</option><option value="post_score">Post-score</option></select></label>
-            {item.enforcementType === "spot" ? <><label className="field"><span>Spot side</span><select value={item.foulSpotSide} onChange={(event) => set("penalties", form.penalties.map((entry) => entry.id === item.id ? { ...entry, foulSpotSide: event.target.value as TeamSide } : entry))}><option value="home">Home</option><option value="away">Away</option></select></label><label className="field"><span>Spot yard</span><input value={item.foulSpotYardLine} onChange={(event) => set("penalties", form.penalties.map((entry) => entry.id === item.id ? { ...entry, foulSpotYardLine: event.target.value } : entry))} /></label></> : null}
-            <label className="checkbox-field"><input type="checkbox" checked={item.automaticFirstDown} onChange={(event) => set("penalties", form.penalties.map((entry) => entry.id === item.id ? { ...entry, automaticFirstDown: event.target.checked } : entry))} />Auto first</label>
-            <label className="checkbox-field"><input type="checkbox" checked={item.lossOfDown} onChange={(event) => set("penalties", form.penalties.map((entry) => entry.id === item.id ? { ...entry, lossOfDown: event.target.checked } : entry))} />Loss down</label>
-            <label className="checkbox-field"><input type="checkbox" checked={item.replayDown} onChange={(event) => set("penalties", form.penalties.map((entry) => entry.id === item.id ? { ...entry, replayDown: event.target.checked } : entry))} />Replay</label>
-            <label className="checkbox-field"><input type="checkbox" checked={item.noPlay} onChange={(event) => set("penalties", form.penalties.map((entry) => entry.id === item.id ? { ...entry, noPlay: event.target.checked } : entry))} />No play</label>
+      {defensiveParticipantFields.length > 0 ? (
+        <section className="play-entry-defensive-section stack-md" data-testid="play-entry-defensive-section">
+          <div className="entry-header play-entry-role-header">
+            <div>
+              <strong>Defense</strong>
+              <p className="kicker" style={{ margin: "6px 0 0" }}>
+                Minimal tackle, breakup, and takeaway attribution.
+              </p>
+            </div>
+            <button className="mini-button" type="button" onClick={autoFillDefense}>
+              Auto-fill defense
+            </button>
           </div>
-          <button className="mini-button" type="button" onClick={() => set("penalties", form.penalties.filter((entry) => entry.id !== item.id))}>Remove</button>
-        </div>
-      ))}
+          <div className="participant-field-grid play-entry-role-grid">
+            {defensiveParticipantFields.map(renderParticipantField)}
+          </div>
+          <div className="pill-row play-entry-quick-defense">
+            {quickDefense.slice(0, 6).map((entry) => (
+              <button className="chip-button" key={entry.id} type="button" onClick={() => addQuick(entry.jerseyNumber)}>
+                #{entry.jerseyNumber} {entry.displayName}
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
-      <div className="entry-actions">
-        <button className="button-primary" disabled={disabled || submitting} type="button" onClick={() => void submit()}>
-          {disabled
-            ? "Writer lease required"
-            : intent.kind === "edit"
-              ? submitting
-                ? "Saving..."
-                : "Save edit"
-              : submitting
-                ? "Submitting..."
-                : "Submit play"}
-        </button>
-      </div>
+      {showPenaltyOnlyFields || form.penalties.length > 0 ? (
+        <details className="play-entry-secondary" open={showPenaltyOnlyFields}>
+          <summary className="play-entry-secondary-summary">
+            <span>Penalty section</span>
+            <span className="chip">{form.penalties.length} logged</span>
+          </summary>
+          <section className="play-entry-overlay-shell stack-sm" style={{ marginTop: 14 }}>
+            <div className="entry-header">
+              <strong>Penalty details</strong>
+              <button className="button-secondary button-secondary-light" type="button" onClick={() => set("penalties", [...form.penalties, penaltyDefaults(form.possession)])}>Add penalty</button>
+            </div>
+            <div className="pill-row">
+              {penaltyPresets.map((preset) => (
+                <button
+                  className="chip-button"
+                  key={preset.key}
+                  type="button"
+                  onClick={() => setForm((current) => preset.apply(current))}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+            {form.penalties.map((item) => (
+              <div className="penalty-card" key={item.id}>
+                <div className="form-grid">
+                  <label className="field"><span>On</span><select value={item.penalizedSide} onChange={(event) => set("penalties", form.penalties.map((entry) => entry.id === item.id ? { ...entry, penalizedSide: event.target.value as TeamSide } : entry))}><option value="home">Home</option><option value="away">Away</option></select></label>
+                  <label className="field"><span>Code</span><input value={item.code} onChange={(event) => set("penalties", form.penalties.map((entry) => entry.id === item.id ? { ...entry, code: event.target.value } : entry))} /></label>
+                  <label className="field"><span>Yards</span><input value={item.yards} onChange={(event) => set("penalties", form.penalties.map((entry) => entry.id === item.id ? { ...entry, yards: event.target.value } : entry))} /></label>
+                  <label className="field"><span>Result</span><select value={item.result} onChange={(event) => set("penalties", form.penalties.map((entry) => entry.id === item.id ? { ...entry, result: event.target.value as PenaltyDraft["result"] } : entry))}><option value="accepted">Accepted</option><option value="declined">Declined</option><option value="offsetting">Offsetting</option></select></label>
+                  <label className="field"><span>Enforcement</span><select value={item.enforcementType} onChange={(event) => set("penalties", form.penalties.map((entry) => entry.id === item.id ? { ...entry, enforcementType: event.target.value as PenaltyDraft["enforcementType"] } : entry))}><option value="previous_spot">Previous</option><option value="spot">Spot</option><option value="dead_ball">Dead ball</option><option value="succeeding_spot">Succeeding</option></select></label>
+                  <label className="field"><span>Timing</span><select value={item.timing} onChange={(event) => set("penalties", form.penalties.map((entry) => entry.id === item.id ? { ...entry, timing: event.target.value as PenaltyDraft["timing"] } : entry))}><option value="live_ball">Live ball</option><option value="dead_ball">Dead ball</option><option value="post_possession">Post-possession</option><option value="post_score">Post-score</option></select></label>
+                  {item.enforcementType === "spot" ? <><label className="field"><span>Spot side</span><select value={item.foulSpotSide} onChange={(event) => set("penalties", form.penalties.map((entry) => entry.id === item.id ? { ...entry, foulSpotSide: event.target.value as TeamSide } : entry))}><option value="home">Home</option><option value="away">Away</option></select></label><label className="field"><span>Spot yard</span><input value={item.foulSpotYardLine} onChange={(event) => set("penalties", form.penalties.map((entry) => entry.id === item.id ? { ...entry, foulSpotYardLine: event.target.value } : entry))} /></label></> : null}
+                  <label className="checkbox-field"><input type="checkbox" checked={item.automaticFirstDown} onChange={(event) => set("penalties", form.penalties.map((entry) => entry.id === item.id ? { ...entry, automaticFirstDown: event.target.checked } : entry))} />Auto first</label>
+                  <label className="checkbox-field"><input type="checkbox" checked={item.lossOfDown} onChange={(event) => set("penalties", form.penalties.map((entry) => entry.id === item.id ? { ...entry, lossOfDown: event.target.checked } : entry))} />Loss down</label>
+                  <label className="checkbox-field"><input type="checkbox" checked={item.replayDown} onChange={(event) => set("penalties", form.penalties.map((entry) => entry.id === item.id ? { ...entry, replayDown: event.target.checked } : entry))} />Replay</label>
+                  <label className="checkbox-field"><input type="checkbox" checked={item.noPlay} onChange={(event) => set("penalties", form.penalties.map((entry) => entry.id === item.id ? { ...entry, noPlay: event.target.checked } : entry))} />No play</label>
+                </div>
+                <button className="mini-button" type="button" onClick={() => set("penalties", form.penalties.filter((entry) => entry.id !== item.id))}>Remove</button>
+              </div>
+            ))}
+          </section>
+        </details>
+      ) : null}
+
+      <section className="play-entry-footer">
+      {!viewerMode ? (
+        <div className="entry-actions play-entry-submit-wrap" data-testid="submit-controls">
+          <button className="button-primary" data-testid="submit-play-button" disabled={disabled || submitting} type="button" onClick={() => void submit()}>
+            {disabled
+              ? "Writer lease required"
+              : intent.kind === "edit"
+                ? submitting
+                  ? "Saving..."
+                  : "Save edit"
+                : submitting
+                  ? "Submitting..."
+                  : "Submit play"}
+          </button>
+        </div>
+      ) : null}
+      </section>
+        </>
+      )}
     </section>
   );
 }

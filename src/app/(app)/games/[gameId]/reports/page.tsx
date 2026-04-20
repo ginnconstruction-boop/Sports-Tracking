@@ -21,6 +21,36 @@ function statEntries(totals: Record<string, number | undefined>) {
   return Object.entries(totals).filter(([, value]) => typeof value === "number" && value !== 0).slice(0, 8);
 }
 
+function statTotal(totals: Record<string, number | undefined>, key: string) {
+  return totals[key] ?? 0;
+}
+
+function formatThirdDownLine(totals: Record<string, number | undefined>) {
+  const made = statTotal(totals, "third_down_conversion");
+  const attempts = statTotal(totals, "third_down_attempt");
+  return `${made}/${attempts}`;
+}
+
+function formatThirdDownRate(totals: Record<string, number | undefined>) {
+  const made = statTotal(totals, "third_down_conversion");
+  const attempts = statTotal(totals, "third_down_attempt");
+
+  if (attempts === 0) {
+    return "No 3rd-down attempts";
+  }
+
+  return `${Math.round((made / attempts) * 100)}% conversion`;
+}
+
+function featuredTeamStats(totals: Record<string, number | undefined>) {
+  return [
+    { label: "First downs", value: statTotal(totals, "first_down") },
+    { label: "3rd down", value: formatThirdDownLine(totals), meta: formatThirdDownRate(totals) },
+    { label: "Red zone trips", value: statTotal(totals, "red_zone_trip") },
+    { label: "Total yards", value: statTotal(totals, "rushing_yards") + statTotal(totals, "passing_yards") }
+  ];
+}
+
 function driveResultLabel(result: string) {
   return result.replaceAll("_", " ");
 }
@@ -57,11 +87,11 @@ export default async function ReportsPage({ params }: PageProps) {
       title="Reports and exports stay downstream from the play log."
       subtitle="The preview on this screen is built from the canonical report document, and the player/team stat tables remain projections of the same ordered event history."
     >
-      <section className="section-grid">
+      <section className="section-grid reports-shell">
         <GameContextHeader record={record} compact />
-        <section className="section-card pad-lg stack-lg">
+        <section className="section-card pad-lg stack-lg reports-hero">
           <div className="stack-sm">
-            <span className="eyebrow" style={{ background: "rgba(19, 34, 27, 0.08)", color: "#2f4338" }}>
+            <span className="eyebrow reports-eyebrow">
               Report preview
             </span>
             <h2 style={{ margin: 0 }}>
@@ -81,12 +111,21 @@ export default async function ReportsPage({ params }: PageProps) {
             <span className="chip">Generated {new Date(preview.generatedAt).toLocaleString()}</span>
           </div>
 
-          <div className="report-grid">
+          <div className="report-grid reports-hero-grid">
             {preview.teamStats.map((team) => (
-              <div className="report-card stack-sm" key={team.side}>
+              <div className="report-card stack-sm reports-hero-card" key={team.side}>
                 <strong>{team.label}</strong>
+                <div className="report-grid">
+                  {featuredTeamStats(team.totals).map((item) => (
+                    <div className="metric-card stack-sm" key={`${team.side}-${item.label}`}>
+                      <span className="metric-label">{item.label}</span>
+                      <strong className="metric-value">{item.value}</strong>
+                      {"meta" in item && item.meta ? <span className="kicker">{item.meta}</span> : null}
+                    </div>
+                  ))}
+                </div>
                 {statEntries(team.totals).map(([key, value]) => (
-                  <div className="timeline-meta" key={key}>
+                  <div className="timeline-meta" key={`${team.side}-${key}`}>
                     <span>{key.replaceAll("_", " ")}</span>
                     <span className="mono">{value}</span>
                   </div>
@@ -96,8 +135,8 @@ export default async function ReportsPage({ params }: PageProps) {
           </div>
         </section>
 
-        <section className="two-column">
-          <div className="section-card pad-lg stack-md">
+        <section className="two-column reports-summary-grid">
+          <div className="section-card pad-lg stack-md reports-summary-card">
             <div className="entry-header">
               <h2 style={{ margin: 0 }}>Coach packet summary</h2>
               <span className="chip">{preview.context.status}</span>
@@ -124,7 +163,7 @@ export default async function ReportsPage({ params }: PageProps) {
             </div>
           </div>
 
-          <div className="section-card pad-lg stack-md">
+          <div className="section-card pad-lg stack-md reports-summary-card">
             <div className="entry-header">
               <h2 style={{ margin: 0 }}>Team stat view</h2>
               <span className="chip">{preview.teamStats.length} sides</span>
@@ -135,6 +174,11 @@ export default async function ReportsPage({ params }: PageProps) {
                   <div className="timeline-top">
                     <strong>{team.label}</strong>
                     <span className="mono">{team.side}</span>
+                  </div>
+                  <div className="pill-row">
+                    <span className="chip">First downs: {statTotal(team.totals, "first_down")}</span>
+                    <span className="chip">3rd down: {formatThirdDownLine(team.totals)}</span>
+                    <span className="chip">Red zone: {statTotal(team.totals, "red_zone_trip")}</span>
                   </div>
                   <div className="pill-row">
                     {statEntries(team.totals).map(([key, value]) => (
@@ -149,8 +193,8 @@ export default async function ReportsPage({ params }: PageProps) {
           </div>
         </section>
 
-        <section className="three-column">
-          <div className="section-card pad-lg stack-sm">
+        <section className="three-column reports-highlights-grid">
+          <div className="section-card pad-lg stack-sm reports-summary-card">
             <h2 style={{ margin: 0 }}>Highlights</h2>
             <div className="stack-sm">
               <div className="timeline-card"><strong>Last score</strong><div className="kicker">{preview.highlights.lastScoringSummary || "None yet."}</div></div>
@@ -158,7 +202,7 @@ export default async function ReportsPage({ params }: PageProps) {
               <div className="timeline-card"><strong>Last penalty</strong><div className="kicker">{preview.highlights.lastPenaltySummary || "None yet."}</div></div>
             </div>
           </div>
-          <div className="section-card pad-lg stack-sm">
+          <div className="section-card pad-lg stack-sm reports-summary-card">
             <h2 style={{ margin: 0 }}>Halftime</h2>
             <div className="timeline-card">
               <div className="timeline-top">
@@ -168,7 +212,7 @@ export default async function ReportsPage({ params }: PageProps) {
               <div className="kicker">{preview.halftimeSummary.note}</div>
             </div>
           </div>
-          <div className="section-card pad-lg stack-sm">
+          <div className="section-card pad-lg stack-sm reports-summary-card">
             <h2 style={{ margin: 0 }}>Final outlook</h2>
             <div className="timeline-card">
               <div className="timeline-top">

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { playParticipantRoles } from "@/lib/domain/play-log";
 import { parseClockToSeconds } from "@/lib/engine/clock";
 
-const sequenceTokenSchema = z.string().regex(/^\d+(\.\d{1,12})?$/);
+export const sequenceTokenSchema = z.string().regex(/^\d+(\.\d{1,12})?$/);
 const clockDisplaySchema = z.string().regex(/^\d{1,2}:\d{2}$/);
 
 const fieldPositionSchema = z.object({

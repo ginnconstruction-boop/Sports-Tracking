@@ -93,6 +93,13 @@ export const playParticipantRoleEnum = pgEnum("play_participant_role", [
 
 export const exportStatusEnum = pgEnum("export_status", ["queued", "processing", "complete", "failed"]);
 export const playAuditActionEnum = pgEnum("play_audit_action", ["created", "updated", "deleted"]);
+export const gameStateCorrectionKindEnum = pgEnum("game_state_correction_kind", ["situation"]);
+export const gameStateCorrectionReasonCategoryEnum = pgEnum("game_state_correction_reason_category", [
+  "missed_play",
+  "live_resync",
+  "official_correction",
+  "other"
+]);
 const supabaseAuth = pgSchema("auth");
 
 export const authUsers = supabaseAuth.table("users", {
@@ -489,5 +496,33 @@ export const playReviewAnnotations = pgTable(
   (table) => ({
     playIdx: uniqueIndex("play_review_annotations_play_idx").on(table.playId),
     gameIdx: index("play_review_annotations_game_idx").on(table.gameId)
+  })
+);
+
+export const gameStateCorrections = pgTable(
+  "game_state_corrections",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    gameId: uuid("game_id")
+      .notNull()
+      .references(() => games.id, { onDelete: "cascade" }),
+    kind: gameStateCorrectionKindEnum("kind").default("situation").notNull(),
+    appliesAfterSequence: numeric("applies_after_sequence", { precision: 24, scale: 12 }).notNull(),
+    possession: gameSideEnum("possession").notNull(),
+    ballOn: jsonb("ball_on").notNull(),
+    down: integer("down").notNull(),
+    distance: integer("distance").notNull(),
+    quarter: integer("quarter"),
+    reasonCategory: gameStateCorrectionReasonCategoryEnum("reason_category").notNull(),
+    reasonNote: text("reason_note").notNull(),
+    createdByUserId: uuid("created_by_user_id").references(() => appUsers.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    voidedByUserId: uuid("voided_by_user_id").references(() => appUsers.id),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidReasonNote: text("void_reason_note")
+  },
+  (table) => ({
+    gameSequenceIdx: index("game_state_corrections_game_sequence_idx").on(table.gameId, table.appliesAfterSequence),
+    gameCreatedIdx: index("game_state_corrections_game_created_idx").on(table.gameId, table.createdAt)
   })
 );

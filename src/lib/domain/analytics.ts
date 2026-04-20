@@ -5,6 +5,13 @@ export type AnalyticsTeamSummary = {
   wins: number;
   losses: number;
   ties: number;
+  firstDowns: number;
+  totalYards: number;
+  rushingYards: number;
+  passingYards: number;
+  thirdDownAttempts: number;
+  thirdDownConversions: number;
+  redZoneTrips: number;
   totalPlays: number;
   totalDrives: number;
 };
@@ -14,8 +21,10 @@ export type AnalyticsTrendPoint = {
   label: string;
   pointsFor: number;
   pointsAgainst: number;
+  firstDowns: number;
   turnoverMargin: number;
   explosivePlays: number;
+  thirdDownAttempts: number;
   thirdDownConversions: number;
   redZoneTrips: number;
 };

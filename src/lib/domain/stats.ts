@@ -1,6 +1,13 @@
 import type { TeamSide } from "@/lib/domain/play-log";
 
 export const statTypes = [
+  "first_down",
+  "third_down_attempt",
+  "third_down_conversion",
+  "red_zone_trip",
+  "red_zone_score",
+  "goal_to_go_trip",
+  "goal_to_go_score",
   "rushing_attempt",
   "rushing_yards",
   "rushing_touchdown",

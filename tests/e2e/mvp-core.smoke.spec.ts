@@ -338,14 +338,49 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
     });
 
     await runStep("create game", async () => {
-      const games = await browserJson<{ items: Array<{ game: { id: string; opponentId: string; venueId?: string | null } }> }>(
+      if (!setupMode()) {
+        const kickoff = new Date();
+        kickoff.setMinutes(kickoff.getMinutes() + 90);
+        kickoff.setSeconds(0, 0);
+        const arrival = new Date(kickoff.getTime() - 45 * 60_000);
+        const report = new Date(arrival.getTime() - 30 * 60_000);
+
+        const createdGame = await browserJson<{ item: { id: string } }>(page, "/api/v1/games", {
+          method: "POST",
+          body: JSON.stringify({
+            seasonId,
+            opponentId,
+            venueId: venueId || undefined,
+            kickoffAt: kickoff.toISOString(),
+            arrivalAt: arrival.toISOString(),
+            reportAt: report.toISOString(),
+            homeAway: smoke.game.homeAway,
+            status: "scheduled"
+          })
+        });
+
+        expect(createdGame.status).toBe(201);
+        gameId = createdGame.body.item.id;
+        return;
+      }
+
+      const games = await browserJson<{
+        items: Array<{
+          game: {
+            id: string;
+            opponentId: string;
+            venueId?: string | null;
+            currentRevision?: number;
+            status?: string;
+          };
+        }>;
+      }>(
         page,
         `/api/v1/games?seasonId=${seasonId}`
       );
       expect(games.status).toBe(200);
       const gameItems = Array.isArray(games.body.items) ? games.body.items : [];
-      let match = pickPreferredMatch(
-        gameItems,
+      let match = gameItems.find(
         (item) => item.game.opponentId === opponentId && item.game.venueId === venueId
       );
 
@@ -371,6 +406,13 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
         expect(refreshedGames.status).toBe(200);
         match = pickPreferredMatch(
           Array.isArray(refreshedGames.body.items) ? refreshedGames.body.items : [],
+          (item) => item.game.opponentId === opponentId && item.game.venueId === venueId
+        );
+      }
+
+      if (!match) {
+        match = pickPreferredMatch(
+          gameItems,
           (item) => item.game.opponentId === opponentId && item.game.venueId === venueId
         );
       }
@@ -443,14 +485,17 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
 
       expect(live.status).toBe(200);
       expect(plays.status).toBe(200);
-      await expect(page.getByRole("heading", { name: "Live oversight" })).toBeVisible();
+      await expect(page.getByTestId("game-day-recent-plays")).toBeVisible();
     });
 
     await runStep("submit one simple play", async () => {
-      const playEntrySection = page
-        .getByRole("heading", { name: "Play Entry" })
-        .locator("xpath=ancestor::section[contains(@class,'section-card')][1]");
-      const submitButton = playEntrySection.getByRole("button", { name: "Submit play", exact: true });
+      const playEntrySection = page.getByTestId("play-entry-shell");
+      const collapsedEntry = page.getByTestId("play-entry-collapsed");
+      if (await collapsedEntry.count()) {
+        await collapsedEntry.getByRole("button", { name: "Open play entry", exact: true }).click();
+      }
+
+      const submitButton = page.getByTestId("submit-play-button");
       if (await submitButton.isDisabled()) {
         const leaseButton = page.getByRole("button", { name: /^(Try writer lease|Trying\.\.\.)$/ }).first();
         if (await leaseButton.count()) {
@@ -461,14 +506,33 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
 
       await expect(submitButton).toBeEnabled();
 
-      const runButton = playEntrySection.getByRole("button", { name: "run", exact: true });
+      const runButton = playEntrySection.getByRole("button", { name: /^Run$/, exact: true });
       if (await runButton.count()) {
         await runButton.first().click();
       }
 
       const ballCarrierField = playEntrySection.getByLabel(/Ball carrier/i).first();
-      await expect(ballCarrierField).toBeVisible();
-      await ballCarrierField.fill("1");
+      const kickerField = playEntrySection.getByLabel(/^Kicker/i).first();
+
+      if (await ballCarrierField.count()) {
+        await expect(ballCarrierField).toBeVisible();
+        await ballCarrierField.fill("1");
+      } else if (await kickerField.count()) {
+        await expect(kickerField).toBeVisible();
+        await kickerField.fill("1");
+
+        const touchbackButton = playEntrySection.getByRole("button", { name: /^Touchback$/, exact: true }).first();
+        if (await touchbackButton.count()) {
+          await touchbackButton.click();
+        } else {
+          const returnResultSelect = playEntrySection.getByLabel(/Return result/i).first();
+          if (await returnResultSelect.count()) {
+            await returnResultSelect.selectOption("touchback");
+          }
+        }
+      } else {
+        throw new Error("No supported primary entry field was visible for the smoke play submission.");
+      }
 
       const playPost = page.waitForResponse(
         (response) =>

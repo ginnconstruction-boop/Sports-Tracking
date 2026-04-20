@@ -7,6 +7,7 @@ import type {
   PlayRecord,
   PlayType
 } from "@/lib/domain/play-log";
+import type { GameStateCorrection } from "@/lib/domain/state-corrections";
 import { rebuildFromPlayLog } from "@/lib/engine/rebuild";
 import { compareSequence } from "@/lib/engine/sequence";
 import { logServerError } from "@/lib/server/observability";
@@ -55,8 +56,42 @@ type PlayPenaltyRow = {
   no_play: boolean;
 };
 
+type GameStateCorrectionRow = {
+  id: string;
+  kind: "situation";
+  applies_after_sequence: string | number;
+  possession: "home" | "away";
+  ball_on: Record<string, unknown> | null;
+  down: number;
+  distance: number;
+  quarter: number | null;
+  reason_category: GameStateCorrection["reasonCategory"];
+  reason_note: string;
+  created_by_user_id: string | null;
+  created_at: string;
+  voided_by_user_id: string | null;
+  voided_at: string | null;
+  void_reason_note: string | null;
+};
+
 function normalizeSequenceToken(sequence: string | number) {
   return typeof sequence === "string" ? sequence : String(sequence);
+}
+
+function isMissingStateCorrectionsTable(error: { message: string } | null) {
+  return Boolean(
+    error?.message?.includes("game_state_corrections") &&
+      (error.message.includes("schema cache") || error.message.includes("relation"))
+  );
+}
+
+function isMissingStateCorrectionVoidColumns(error: { message: string } | null) {
+  return Boolean(
+    error?.message?.includes("game_state_corrections.") &&
+      (error.message.includes("voided_by_user_id") ||
+        error.message.includes("voided_at") ||
+        error.message.includes("void_reason_note"))
+  );
 }
 
 export async function projectGameFromPlayLog(
@@ -69,7 +104,7 @@ export async function projectGameFromPlayLog(
   }
   const supabaseAdmin = createSupabaseAdminClient();
 
-  const [gameResult, eventsResult] = await Promise.all([
+  const [gameResult, eventsResult, correctionsResult] = await Promise.all([
     supabaseAdmin
       .from("games")
       .select("id,current_revision,status,last_rebuilt_at")
@@ -80,8 +115,48 @@ export async function projectGameFromPlayLog(
       .select("id,sequence,quarter,clock_seconds,possession,play_type,summary,payload")
       .eq("game_id", gameId)
       .order("sequence", { ascending: true })
-      .returns<PlayEventRow[]>()
+      .returns<PlayEventRow[]>(),
+    supabaseAdmin
+      .from("game_state_corrections")
+      .select(
+        "id,kind,applies_after_sequence,possession,ball_on,down,distance,quarter,reason_category,reason_note,created_by_user_id,created_at,voided_by_user_id,voided_at,void_reason_note"
+      )
+      .eq("game_id", gameId)
+      .is("voided_at", null)
+      .order("applies_after_sequence", { ascending: true })
+      .order("created_at", { ascending: true })
+      .returns<GameStateCorrectionRow[]>()
   ]);
+
+  let correctionsError = correctionsResult.error;
+  let correctionsData = correctionsResult.data ?? [];
+
+  if (isMissingStateCorrectionVoidColumns(correctionsResult.error)) {
+    const fallbackCorrectionsResult = await supabaseAdmin
+      .from("game_state_corrections")
+      .select(
+        "id,kind,applies_after_sequence,possession,ball_on,down,distance,quarter,reason_category,reason_note,created_by_user_id,created_at"
+      )
+      .eq("game_id", gameId)
+      .order("applies_after_sequence", { ascending: true })
+      .order("created_at", { ascending: true })
+      .returns<
+        Array<
+          Omit<
+            GameStateCorrectionRow,
+            "voided_by_user_id" | "voided_at" | "void_reason_note"
+          >
+        >
+      >();
+
+    correctionsError = fallbackCorrectionsResult.error;
+    correctionsData = (fallbackCorrectionsResult.data ?? []).map((row) => ({
+      ...row,
+      voided_by_user_id: null,
+      voided_at: null,
+      void_reason_note: null
+    }));
+  }
 
   if (gameResult.error) {
     throw new Error(gameResult.error.message);
@@ -91,8 +166,13 @@ export async function projectGameFromPlayLog(
     throw new Error(eventsResult.error.message);
   }
 
+  if (correctionsError && !isMissingStateCorrectionsTable(correctionsError)) {
+    throw new Error(correctionsError.message);
+  }
+
   const game = gameResult.data;
   const events = eventsResult.data ?? [];
+  const corrections = correctionsError ? [] : correctionsData;
 
   if (!game) {
     throw new Error("Game not found.");
@@ -163,6 +243,27 @@ export async function projectGameFromPlayLog(
           noPlay: penalty.no_play
         }))
     }));
+  const typedCorrections: GameStateCorrection[] = corrections.map((correction) => ({
+    id: correction.id,
+    gameId,
+    kind: correction.kind,
+    appliesAfterSequence: normalizeSequenceToken(correction.applies_after_sequence),
+    possession: correction.possession,
+    ballOn: {
+      side: ((correction.ball_on ?? {}) as { side?: "home" | "away" }).side ?? correction.possession,
+      yardLine: Number(((correction.ball_on ?? {}) as { yardLine?: number }).yardLine ?? 1)
+    },
+    down: correction.down as 1 | 2 | 3 | 4,
+    distance: correction.distance,
+    quarter: correction.quarter as 1 | 2 | 3 | 4 | 5 | undefined,
+    reasonCategory: correction.reason_category,
+    reasonNote: correction.reason_note,
+    createdByUserId: correction.created_by_user_id ?? "",
+    createdAt: correction.created_at,
+    voidedByUserId: correction.voided_by_user_id ?? undefined,
+    voidedAt: correction.voided_at ?? undefined,
+    voidReasonNote: correction.void_reason_note ?? undefined
+  }));
 
   const projection =
     options.fromSequence && typedEvents.some((event) => compareSequence(event.sequence, options.fromSequence!) < 0)
@@ -170,14 +271,22 @@ export async function projectGameFromPlayLog(
           const prefixEvents = typedEvents.filter(
             (event) => compareSequence(event.sequence, options.fromSequence!) < 0
           );
-          const prefixProjection = rebuildFromPlayLog(prefixEvents);
+          const prefixCorrections = typedCorrections.filter(
+            (correction) => compareSequence(correction.appliesAfterSequence, options.fromSequence!) < 0
+          );
+          const prefixProjection = rebuildFromPlayLog(prefixEvents, {
+            corrections: prefixCorrections
+          });
           return rebuildFromPlayLog(typedEvents, {
             fromSequence: options.fromSequence,
             seedState: prefixProjection.currentState,
-            priorTimeline: prefixProjection.timeline
+            priorTimeline: prefixProjection.timeline,
+            corrections: typedCorrections
           });
         })()
-      : rebuildFromPlayLog(typedEvents);
+      : rebuildFromPlayLog(typedEvents, {
+          corrections: typedCorrections
+        });
 
   return {
     game,

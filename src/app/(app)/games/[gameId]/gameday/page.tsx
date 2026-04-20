@@ -1,6 +1,5 @@
 import { AppShell } from "@/components/chrome/app-shell";
 import { GameDayConsole } from "@/components/game-day/game-day-console";
-import { GameContextHeader } from "@/components/games/game-context-header";
 import { isFeatureEnabled } from "@/lib/features/runtime";
 import { notFound } from "next/navigation";
 import { getGameDaySnapshot } from "@/server/services/game-day-service";
@@ -28,12 +27,11 @@ export default async function GameDayPage({ params }: PageProps) {
     <AppShell
       gameId={gameId}
       current="gameday"
-      title="Game Day Mode"
-      subtitle="A dedicated sideline surface for fast live entry: large tap targets, jersey-first shortcuts, visible game state, and correction tools without leaving the screen."
+      title="Game Day Overview"
+      subtitle="Overview, review, correction, and navigation for the current game. Jump into Live Entry when you need a distraction-free sideline input surface."
     >
       <section className="section-grid">
-        <GameContextHeader record={record} compact />
-        <GameDayConsole gameId={gameId} initialSnapshot={snapshot} />
+        <GameDayConsole gameId={gameId} record={record} initialSnapshot={snapshot} />
       </section>
     </AppShell>
   );

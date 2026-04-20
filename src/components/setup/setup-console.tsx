@@ -1059,16 +1059,16 @@ export function SetupConsole({ memberships }: Props) {
   }
 
   return (
-    <section className="section-grid">
+    <section className="section-grid setup-shell">
       {organizationId && showBranding ? <BrandingPanel organizationId={organizationId} /> : null}
 
-      <section className="section-card pad-lg stack-md">
+      <section className="section-card pad-lg stack-md setup-hero">
         <div className="entry-header">
-          <div>
+          <div className="stack-sm">
             <h2 style={{ margin: 0 }}>Program setup</h2>
             <p className="kicker">Move through setup in order, then jump back to any unlocked step whenever you need.</p>
           </div>
-          <div className="stack-sm" style={{ minWidth: 280 }}>
+          <div className="stack-sm setup-hero-selector" style={{ minWidth: 280 }}>
             <label className="field">
               <span>Organization</span>
               <select value={organizationId} onChange={(event) => setOrganizationId(event.target.value)}>
@@ -1083,7 +1083,7 @@ export function SetupConsole({ memberships }: Props) {
             <span className="chip">{statusText}</span>
           </div>
         </div>
-        <div className="pill-row">
+        <div className="pill-row setup-step-row">
           {flowSteps.map((step) => (
             <button
               key={step.key}
@@ -1102,7 +1102,7 @@ export function SetupConsole({ memberships }: Props) {
       </section>
 
       {activeStep === "organization" ? (
-      <section className="section-card pad-lg stack-md">
+      <section className="section-card pad-lg stack-md setup-step-card setup-step-card-accent">
         <div className="entry-header">
           <div>
             <h2 style={{ margin: 0 }}>Organization</h2>
@@ -1154,9 +1154,9 @@ export function SetupConsole({ memberships }: Props) {
       ) : null}
 
       {activeStep === "team" ? (
-      <section className="two-column">
+      <section className="two-column setup-stage-grid">
         {showTeamManagement ? (
-        <div className="section-card pad-lg stack-md">
+        <div className="section-card pad-lg stack-md setup-step-card">
           <div className="entry-header">
             <h2 style={{ margin: 0 }}>Teams</h2>
             <span className="chip">{teams.length} teams</span>
@@ -1206,9 +1206,9 @@ export function SetupConsole({ memberships }: Props) {
       ) : null}
 
       {activeStep === "season" ? (
-      <section className="two-column">
+      <section className="two-column setup-stage-grid">
         {showSeasonManagement ? (
-        <div className="section-card pad-lg stack-md">
+        <div className="section-card pad-lg stack-md setup-step-card">
           <div className="entry-header">
             <h2 style={{ margin: 0 }}>Seasons</h2>
             <span className="chip">{seasons.length} seasons</span>
@@ -1262,7 +1262,7 @@ export function SetupConsole({ memberships }: Props) {
         ) : null}
 
         {showRosterImport ? (
-        <div className="section-card pad-lg stack-md">
+        <div className="section-card pad-lg stack-md setup-step-card">
           <RosterImportPanel
             organizationId={organizationId}
             seasonId={selectedSeasonId}
@@ -1278,9 +1278,9 @@ export function SetupConsole({ memberships }: Props) {
       ) : null}
 
       {activeStep === "details" ? (
-      <section className="two-column">
+      <section className="two-column setup-stage-grid">
         {showOpponentManagement ? (
-        <div className="section-card pad-lg stack-md">
+        <div className="section-card pad-lg stack-md setup-step-card">
           <div className="entry-header">
             <h2 style={{ margin: 0 }}>Opponents</h2>
             <span className="chip">{opponents.length} opponents</span>
@@ -1332,7 +1332,7 @@ export function SetupConsole({ memberships }: Props) {
         </div>
         ) : null}
 
-        <div className="section-card pad-lg stack-md">
+        <div className="section-card pad-lg stack-md setup-step-card">
           <div className="entry-header">
             <h2 style={{ margin: 0 }}>Venues</h2>
             <span className="chip">{venues.length} venues</span>
@@ -1386,8 +1386,8 @@ export function SetupConsole({ memberships }: Props) {
       ) : null}
 
       {activeStep === "schedule" ? (
-      <section className="two-column">
-        <div className="section-card pad-lg stack-md">
+      <section className="two-column setup-stage-grid">
+        <div className="section-card pad-lg stack-md setup-step-card">
           <div className="entry-header">
             <h2 style={{ margin: 0 }}>Season schedule</h2>
             <span className="chip">{games.length} games</span>
@@ -1512,7 +1512,7 @@ export function SetupConsole({ memberships }: Props) {
           </div>
         </div>
 
-        <div className="section-card pad-lg stack-md">
+        <div className="section-card pad-lg stack-md setup-step-card">
           <div className="entry-header">
             <h2 style={{ margin: 0 }}>Game list</h2>
             <span className="chip">{filteredGames.length} shown</span>

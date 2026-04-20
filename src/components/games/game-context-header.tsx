@@ -34,21 +34,51 @@ export function GameContextHeader({ record, compact = false }: Props) {
       ])
     : "Venue TBD";
 
+  const subtitleParts = [
+    record.season.label,
+    `${record.team.name} ${record.team.level}`,
+    `status ${record.game.status.replaceAll("_", " ")}`
+  ];
+
+  if (compact) {
+    return (
+      <section className="section-card pad-md stack-sm context-shell compact-context-shell">
+        <div className="entry-header compact-context-header">
+          <div className="stack-sm">
+            <span className="eyebrow context-eyebrow">Game context</span>
+            <h2 style={{ margin: 0 }}>
+              {record.sideLabels.away} at {record.sideLabels.home}
+            </h2>
+            <p className="kicker context-subtitle" style={{ margin: 0 }}>
+              {subtitleParts.join(" | ")}
+            </p>
+          </div>
+          <div className="pill-row context-meta-pills compact-context-pills">
+            <span className="chip">Kickoff {formatDateTime(record.game.kickoffAt)}</span>
+            <span className="chip">{venueLabel}</span>
+            <span className="chip">Revision {record.game.currentRevision}</span>
+            <span className="chip">
+              {record.game.publicLiveEnabled || record.game.publicReportsEnabled ? "Public enabled" : "Private"}
+            </span>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   return (
-    <section className={`section-card ${compact ? "pad-md" : "pad-lg"} stack-md`}>
+    <section className={`section-card ${compact ? "pad-md" : "pad-lg"} stack-md context-shell`}>
       <div className="entry-header">
         <div className="stack-sm">
-          <span className="eyebrow" style={{ background: "rgba(19, 34, 27, 0.08)", color: "#2f4338" }}>
-            Game context
-          </span>
+          <span className="eyebrow context-eyebrow">Game context</span>
           <h2 style={{ margin: 0 }}>
             {record.sideLabels.away} at {record.sideLabels.home}
           </h2>
-          <p className="kicker" style={{ margin: 0 }}>
-            {record.season.label} · {record.team.name} {record.team.level} · status {record.game.status.replaceAll("_", " ")}
+          <p className="kicker context-subtitle" style={{ margin: 0 }}>
+            {subtitleParts.join(" | ")}
           </p>
         </div>
-        <div className="pill-row">
+        <div className="pill-row context-meta-pills">
           <span className="chip">Kickoff {formatDateTime(record.game.kickoffAt)}</span>
           <span className="chip">Arrival {formatDateTime(record.game.arrivalAt)}</span>
           <span className="chip">Report {formatDateTime(record.game.reportAt)}</span>
@@ -58,15 +88,21 @@ export function GameContextHeader({ record, compact = false }: Props) {
       <div className="metric-grid">
         <div className="metric-card">
           <div className="metric-label">Venue</div>
-          <div className="metric-value" style={{ fontSize: "1.05rem" }}>{venueLabel}</div>
+          <div className="metric-value" style={{ fontSize: "1.05rem" }}>
+            {venueLabel}
+          </div>
         </div>
         <div className="metric-card">
           <div className="metric-label">Weather</div>
-          <div className="metric-value" style={{ fontSize: "1.05rem" }}>{record.game.weatherConditions || "Not set"}</div>
+          <div className="metric-value" style={{ fontSize: "1.05rem" }}>
+            {record.game.weatherConditions || "Not set"}
+          </div>
         </div>
         <div className="metric-card">
           <div className="metric-label">Field conditions</div>
-          <div className="metric-value" style={{ fontSize: "1.05rem" }}>{record.game.fieldConditions || "Not set"}</div>
+          <div className="metric-value" style={{ fontSize: "1.05rem" }}>
+            {record.game.fieldConditions || "Not set"}
+          </div>
         </div>
         <div className="metric-card">
           <div className="metric-label">Revision count</div>
@@ -86,18 +122,24 @@ export function GameContextHeader({ record, compact = false }: Props) {
         </div>
       </div>
 
-      <div className="three-column">
-        <div className="section-card stack-sm" style={{ padding: 18 }}>
+      <div className="three-column context-notes-grid">
+        <div className="section-card stack-sm context-note-card" style={{ padding: 18 }}>
           <strong>Opponent prep</strong>
-          <p className="kicker" style={{ margin: 0 }}>{record.game.opponentPrepNotes || "No opponent prep notes yet."}</p>
+          <p className="kicker" style={{ margin: 0 }}>
+            {record.game.opponentPrepNotes || "No opponent prep notes yet."}
+          </p>
         </div>
-        <div className="section-card stack-sm" style={{ padding: 18 }}>
+        <div className="section-card stack-sm context-note-card" style={{ padding: 18 }}>
           <strong>Staff notes</strong>
-          <p className="kicker" style={{ margin: 0 }}>{record.game.staffNotes || "No internal notes yet."}</p>
+          <p className="kicker" style={{ margin: 0 }}>
+            {record.game.staffNotes || "No internal notes yet."}
+          </p>
         </div>
-        <div className="section-card stack-sm" style={{ padding: 18 }}>
+        <div className="section-card stack-sm context-note-card" style={{ padding: 18 }}>
           <strong>Logistics</strong>
-          <p className="kicker" style={{ margin: 0 }}>{record.game.logisticsNotes || "No logistics notes yet."}</p>
+          <p className="kicker" style={{ margin: 0 }}>
+            {record.game.logisticsNotes || "No logistics notes yet."}
+          </p>
         </div>
       </div>
     </section>

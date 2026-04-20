@@ -1,12 +1,13 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useEffectEvent, useMemo, useState, useTransition } from "react";
-import type { GameDaySnapshot } from "@/lib/domain/game-day";
+import { useEffect, useEffectEvent, useState, useTransition } from "react";
+import type { GameAdminRecord } from "@/lib/domain/game-admin";
+import type { GameDayPlayView, GameDaySnapshot } from "@/lib/domain/game-day";
 import type { PlayRecord } from "@/lib/domain/play-log";
+import type { GameStateCorrection } from "@/lib/domain/state-corrections";
 import { isFeatureEnabled } from "@/lib/features/runtime";
 import { buildGameDaySnapshot } from "@/lib/game-day/snapshot";
-import { formatClock, parseClockToSeconds } from "@/lib/engine/clock";
+import { parseClockToSeconds } from "@/lib/engine/clock";
 import { rebuildFromPlayLog } from "@/lib/engine/rebuild";
 import { compareSequence } from "@/lib/engine/sequence";
 import { mergeOutboxMutations, type OutboxMutation } from "@/lib/offline/outbox";
@@ -25,7 +26,7 @@ import {
   type PlayEntryIntent,
   type PlaySubmission
 } from "@/components/game-day/play-entry-panel";
-import { PlayReviewPanel } from "@/components/game-day/play-review-panel";
+import { LiveEntryCenter, LiveGameCenter } from "@/components/game-day/live-game-center";
 
 type GameSessionRecord = {
   id: string;
@@ -40,7 +41,9 @@ type GameSessionRecord = {
 
 type GameDayConsoleProps = {
   gameId: string;
+  record: GameAdminRecord;
   initialSnapshot: GameDaySnapshot;
+  surface?: "overview" | "live";
 };
 
 type PlaysResponse = {
@@ -60,16 +63,37 @@ type MutationResponse = {
   revision: number;
 };
 
-const stableTimeFormatter = new Intl.DateTimeFormat("en-US", {
-  hour: "numeric",
-  minute: "2-digit",
-  second: "2-digit",
-  timeZone: "UTC"
-});
+type SituationCorrectionResponse = {
+  item: GameStateCorrection;
+  live: GameDaySnapshot;
+};
 
-function formatStableTime(value?: string | null) {
-  return value ? stableTimeFormatter.format(new Date(value)) : null;
+type SituationCorrectionsResponse = {
+  items: GameStateCorrection[];
+};
+
+function latestActiveCorrection(corrections: GameStateCorrection[]) {
+  return corrections.find((item) => !item.voidedAt) ?? null;
 }
+
+type SituationCorrectionSubmission = {
+  appliesAfterSequence: string;
+  possession: "home" | "away";
+  ballOn: {
+    side: "home" | "away";
+    yardLine: number;
+  };
+  down: 1 | 2 | 3 | 4;
+  distance: number;
+  quarter?: 1 | 2 | 3 | 4 | 5;
+  reasonCategory: "missed_play" | "live_resync" | "official_correction" | "other";
+  reasonNote: string;
+};
+
+type VoidSituationCorrectionSubmission = {
+  correctionId: string;
+  reasonNote: string;
+};
 
 function getDeviceKey() {
   const storageKey = "tracking-the-game:device-key";
@@ -204,10 +228,8 @@ async function readJson<T>(input: RequestInfo, init?: RequestInit) {
   return body as T;
 }
 
-export function GameDayConsole({ gameId, initialSnapshot }: GameDayConsoleProps) {
+export function GameDayConsole({ gameId, record, initialSnapshot, surface = "overview" }: GameDayConsoleProps) {
   const canUndoLastPlay = isFeatureEnabled("undo_last_play");
-  const showDriveSummary = isFeatureEnabled("drive_summary");
-  const showInternalReview = isFeatureEnabled("internal_debug_tools");
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [playLog, setPlayLog] = useState<PlayRecord[]>([]);
   const [session, setSession] = useState<GameSessionRecord | null>(null);
@@ -216,17 +238,12 @@ export function GameDayConsole({ gameId, initialSnapshot }: GameDayConsoleProps)
   const [errorText, setErrorText] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>("connect");
   const [intent, setIntent] = useState<PlayEntryIntent>({ kind: "append" });
-  const [selectedReviewPlayId, setSelectedReviewPlayId] = useState<string | null>(null);
   const [compactMode, setCompactMode] = useState(false);
-  const [correctionMode, setCorrectionMode] = useState(false);
-  const [selectedPlayIds, setSelectedPlayIds] = useState<string[]>([]);
   const [isPending, startTransition] = useTransition();
   const [isOffline, setIsOffline] = useState(false);
   const [pendingMutations, setPendingMutations] = useState(0);
-  const reviewByPlayId = useMemo(
-    () => new Map(snapshot.playReviews.map((item) => [item.playId, item])),
-    [snapshot.playReviews]
-  );
+  const [latestSituationCorrection, setLatestSituationCorrection] = useState<GameStateCorrection | null>(null);
+  const [situationCorrections, setSituationCorrections] = useState<GameStateCorrection[]>([]);
 
   function captureClientIssue(event: string, error: unknown, context: Record<string, unknown> = {}) {
     const details =
@@ -301,14 +318,19 @@ export function GameDayConsole({ gameId, initialSnapshot }: GameDayConsoleProps)
       })
     });
 
-    const [live, plays] = await Promise.all([
+    const [live, plays, corrections] = await Promise.all([
       readJson<LiveResponse>(`/api/v1/games/${gameId}/live`),
-      readJson<PlaysResponse>(`/api/v1/games/${gameId}/plays`)
+      readJson<PlaysResponse>(`/api/v1/games/${gameId}/plays`),
+      readJson<SituationCorrectionsResponse>(`/api/v1/games/${gameId}/state-corrections`).catch(() => ({
+        items: []
+      }))
     ]);
 
     setSession(opened.item);
     setSnapshot(live.item);
     setPlayLog(plays.items);
+    setSituationCorrections(corrections.items);
+    setLatestSituationCorrection(latestActiveCorrection(corrections.items));
     setIsOffline(false);
     setStatusText(requestActiveWriter ? "Writer lock acquired." : "Viewer session opened.");
     await persistLocalState(live.item, plays.items, opened.item);
@@ -362,9 +384,12 @@ export function GameDayConsole({ gameId, initialSnapshot }: GameDayConsoleProps)
       }
 
       await replaceOutboxMutations(gameId, []);
-      const [live, plays] = await Promise.all([
+      const [live, plays, corrections] = await Promise.all([
         readJson<LiveResponse>(`/api/v1/games/${gameId}/live`),
-        readJson<PlaysResponse>(`/api/v1/games/${gameId}/plays`)
+        readJson<PlaysResponse>(`/api/v1/games/${gameId}/plays`),
+        readJson<SituationCorrectionsResponse>(`/api/v1/games/${gameId}/state-corrections`).catch(() => ({
+          items: []
+        }))
       ]);
 
       const syncedSession = deviceKey
@@ -385,6 +410,8 @@ export function GameDayConsole({ gameId, initialSnapshot }: GameDayConsoleProps)
       startTransition(() => {
         setSnapshot(live.item);
         setPlayLog(plays.items);
+        setSituationCorrections(corrections.items);
+        setLatestSituationCorrection(latestActiveCorrection(corrections.items));
         setPendingMutations(0);
         if (syncedSession) {
           setSession({
@@ -838,526 +865,145 @@ export function GameDayConsole({ gameId, initialSnapshot }: GameDayConsoleProps)
     }
   }
 
-  async function savePlayReview(payload: {
-    playId: string;
-    tags: string[];
-    note?: string;
-    filmUrl?: string;
-  }) {
-    setStatusText("Saving play review...");
+  async function recoverSituation(correction: SituationCorrectionSubmission) {
     setErrorText(null);
+    setBusyAction("recover");
+    setStatusText("Applying situation correction...");
 
     try {
-      const response = await readJson<{ item: GameDaySnapshot["playReviews"][number] }>(
-        `/api/v1/games/${gameId}/plays/${payload.playId}/review`,
+      const response = await readJson<SituationCorrectionResponse>(`/api/v1/games/${gameId}/state-corrections`, {
+        method: "POST",
+        body: JSON.stringify(correction)
+      });
+
+      const nextSession = session
+        ? {
+            ...session,
+            localRevision: response.live.revision,
+            remoteRevision: Math.max(session.remoteRevision, response.live.revision)
+          }
+        : session;
+
+      setSnapshot(response.live);
+      if (nextSession) {
+        setSession(nextSession);
+      }
+      const nextCorrections = [response.item, ...situationCorrections.filter((item) => item.id !== response.item.id)];
+      setLatestSituationCorrection(response.item);
+      setSituationCorrections(nextCorrections);
+      setStatusText("Situation corrected.");
+      await persistLocalState(response.live, playLog, nextSession);
+    } catch (error) {
+      captureClientIssue("recover_situation_failed", error, {
+        appliesAfterSequence: correction.appliesAfterSequence
+      });
+      setErrorText(error instanceof Error ? error.message : "Unable to recover situation.");
+      setStatusText("Situation correction failed.");
+      throw error;
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function voidSituationCorrectionAction(correction: VoidSituationCorrectionSubmission) {
+    setErrorText(null);
+    setBusyAction("void-correction");
+    setStatusText("Voiding situation correction...");
+
+    try {
+      const response = await readJson<SituationCorrectionResponse>(
+        `/api/v1/games/${gameId}/state-corrections/${correction.correctionId}`,
         {
           method: "PATCH",
-          body: JSON.stringify(payload)
+          body: JSON.stringify({
+            reasonNote: correction.reasonNote
+          })
         }
       );
 
-      setSnapshot((current) => ({
-        ...current,
-        playReviews: [
-          ...current.playReviews.filter((item) => item.playId !== payload.playId),
-          response.item
-        ]
-      }));
-      setStatusText("Play review saved.");
+      const nextCorrections = situationCorrections.map((item) =>
+        item.id === response.item.id ? response.item : item
+      );
+      const nextSession = session
+        ? {
+            ...session,
+            localRevision: response.live.revision,
+            remoteRevision: Math.max(session.remoteRevision, response.live.revision)
+          }
+        : session;
+
+      setSnapshot(response.live);
+      setSituationCorrections(nextCorrections);
+      setLatestSituationCorrection(latestActiveCorrection(nextCorrections));
+      if (nextSession) {
+        setSession(nextSession);
+      }
+      setStatusText("Situation correction voided.");
+      await persistLocalState(response.live, playLog, nextSession);
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "Unable to save review.");
-    }
-  }
-
-  async function deletePlayReview(playId: string) {
-    setStatusText("Clearing play review...");
-    setErrorText(null);
-
-    try {
-      await readJson<{ item: { success: true } }>(`/api/v1/games/${gameId}/plays/${playId}/review`, {
-        method: "DELETE"
+      captureClientIssue("void_situation_correction_failed", error, {
+        correctionId: correction.correctionId
       });
-      setSnapshot((current) => ({
-        ...current,
-        playReviews: current.playReviews.filter((item) => item.playId !== playId)
-      }));
-      setStatusText("Play review cleared.");
-    } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "Unable to clear review.");
+      setErrorText(error instanceof Error ? error.message : "Unable to void situation correction.");
+      setStatusText("Unable to void situation correction.");
+      throw error;
+    } finally {
+      setBusyAction(null);
     }
   }
 
-  const state = snapshot.currentState;
-  const writerLabel = session?.isActiveWriter ? "Active writer" : "Viewer";
-  const syncLabel = session?.status ? session.status.replace("_", " ") : "session pending";
   const latestPlay = snapshot.recentPlays[0];
-  const offlineLabel = isOffline ? "offline" : "online";
   const canWrite = Boolean(session?.isActiveWriter);
-  const driveResultLabel = (result: GameDaySnapshot["driveSummaries"][number]["result"]) =>
-    result.replaceAll("_", " ");
-  const currentDrive = snapshot.driveSummaries[0] ?? null;
-  const selectedReviewPlay =
-    snapshot.fullPlayLog.find((item) => item.playId === selectedReviewPlayId) ?? snapshot.fullPlayLog[0] ?? null;
-  const selectedCorrectionPlays = snapshot.fullPlayLog.filter((item) => selectedPlayIds.includes(item.playId));
-  const pressureCues = [
-    state.down >= 3 ? `${state.down === 3 ? "Third" : "Fourth"} down` : null,
-    state.ballOn.side === "away" && state.ballOn.yardLine <= 20 ? "Red zone" : null,
-    state.ballOn.side === "home" && state.ballOn.yardLine <= 10 ? "Backed up" : null,
-    currentDrive?.result === "in_progress" && currentDrive.playCount >= 8 ? "Long drive" : null
-  ].filter(Boolean) as string[];
-
-  function toggleSelectedPlay(playId: string) {
-    setSelectedPlayIds((current) =>
-      current.includes(playId) ? current.filter((item) => item !== playId) : [...current, playId]
-    );
-  }
-
-  return (
-    <section className="app-grid">
-      <div className="board">
-        <div className="board-header">
-          <div className="score-strip">
-            <div className="score-box">
-              <span>{snapshot.awayTeam}</span>
-              <strong>{state.score.away}</strong>
-            </div>
-            <div className="score-box">
-              <span>{state.phase}</span>
-              <strong>{formatClock(state.clockSeconds)}</strong>
-            </div>
-            <div className="score-box">
-              <span>{snapshot.homeTeam}</span>
-              <strong>{state.score.home}</strong>
-            </div>
-          </div>
-
-        </div>
-
-        <div className="board-body stack-lg">
-          <PlayEntryPanel
-            snapshot={snapshot}
-            intent={intent}
-            disabled={!canWrite}
-            submitting={isPending}
-            compactMode={compactMode}
-            onSubmit={submitPlay}
-            onCancelIntent={() => setIntent({ kind: "append" })}
-          />
-          <div className="status-strip">
-            <span className="status-pill strong">{writerLabel}</span>
-            <span className="status-pill">{offlineLabel}</span>
-            <span className="status-pill">{syncLabel}</span>
-            <span className="status-pill">Revision {snapshot.revision}</span>
-            <span className="status-pill">
-              {state.down}&amp;{state.distance} on {state.ballOn.side === "home" ? "own" : "opp"} {state.ballOn.yardLine}
-            </span>
-            <span className="status-pill">
-              Possession {state.possession === "home" ? snapshot.homeTeam : snapshot.awayTeam}
-            </span>
-            {pressureCues.map((cue) => (
-              <span className="status-pill" key={cue}>
-                {cue}
-              </span>
-            ))}
-            {pendingMutations > 0 ? (
-              <span className="status-pill">{pendingMutations} queued</span>
-            ) : null}
-          </div>
-
-          <details className="session-details">
-            <summary className="session-summary">Session &amp; drive info</summary>
-            <div className="stack-md" style={{ marginTop: 14 }}>
-              <div className="split-panel split-panel-balanced">
-                <div className="list-panel">
-                  <h3 style={{ marginTop: 0 }}>Session</h3>
-                  <div className="stack-sm">
-                    <div className="mono">{statusText}</div>
-                    {session?.writerLeaseExpiresAt ? (
-                      <div className="mono">Lease until {formatStableTime(session.writerLeaseExpiresAt)}</div>
-                    ) : null}
-                    {snapshot.lastRebuiltAt ? (
-                      <div className="mono">Last rebuild {formatStableTime(snapshot.lastRebuiltAt)}</div>
-                    ) : null}
-                    {errorText ? <div className="error-note">{errorText}</div> : null}
-                    <div className="timeline-actions">
-                      <button className="mini-button" disabled={busyAction !== null} type="button" onClick={() => setCompactMode((current) => !current)}>
-                        {compactMode ? "Standard mode" : "Ultra-fast mode"}
-                      </button>
-                      {showInternalReview ? (
-                        <button className="mini-button" type="button" onClick={() => setCorrectionMode((current) => !current)}>
-                          {correctionMode ? "Hide correction" : "Correction queue"}
-                        </button>
-                      ) : null}
-                      <button className="mini-button" disabled={busyAction !== null || !deviceKey} type="button" onClick={() => void refreshLiveSnapshot()}>
-                        {busyAction === "refresh" ? "Refreshing..." : "Refresh live"}
-                      </button>
-                      <button className="mini-button" disabled={busyAction !== null || !deviceKey || pendingMutations === 0} type="button" onClick={() => void flushOutbox(deviceKey)}>
-                        Retry sync
-                      </button>
-                      {session?.isActiveWriter ? (
-                        <button className="mini-button" disabled={busyAction !== null} type="button" onClick={() => void releaseWriterLease()}>
-                          Release writer
-                        </button>
-                      ) : null}
-                      {!session?.isActiveWriter ? (
-                        <button className="mini-button" disabled={busyAction !== null || !deviceKey} type="button" onClick={() => void reacquireWriterLease()}>
-                          {busyAction === "lease" ? "Trying..." : "Try writer lease"}
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
-                <div className="list-panel">
-                  <h3 style={{ marginTop: 0 }}>Quarter summary</h3>
-                  <div className="table-like compact">
-                    {snapshot.quarterSummary.map((item) => (
-                      <div className="table-row compact" key={item.quarter}>
-                        <span className="mono">Q{item.quarter}</span>
-                        <span>{item.playCount} plays</span>
-                        <span className="mono">
-                          {item.awayPoints}-{item.homePoints}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="list-panel">
-                <div className="entry-header" style={{ marginBottom: 10 }}>
-                  <h3 style={{ margin: 0 }}>Current drive</h3>
-                  <div className="timeline-actions">
-                    <Link className="mini-button" href={`/games/${gameId}/manage`}>
-                      Game admin
-                    </Link>
-                    {showInternalReview ? (
-                      <Link className="mini-button" href={`/games/${gameId}/review`}>
-                        Review workspace
-                      </Link>
-                    ) : null}
-                  </div>
-                </div>
-                {currentDrive ? (
-                  <div className="stack-sm">
-                    <div className="mono">
-                      {currentDrive.side === "home" ? snapshot.homeTeam : snapshot.awayTeam} from {currentDrive.startFieldPosition}
-                    </div>
-                    <div className="pill-row">
-                      <span className="chip">{currentDrive.playCount} plays</span>
-                      <span className="chip">{currentDrive.yardsGained} yards</span>
-                      <span className="chip">{driveResultLabel(currentDrive.result)}</span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="kicker">Drive summary will appear once live plays are entered.</div>
-                )}
-              </div>
-            </div>
-          </details>
-        </div>
-      </div>
-
-      <div className="section-grid">
-        {showInternalReview && (correctionMode || selectedCorrectionPlays.length > 0) ? (
-          <section className="section-card pad-lg stack-md">
-            <div className="entry-header">
-              <h2 style={{ margin: 0 }}>Correction queue</h2>
-              <span className="chip">{selectedCorrectionPlays.length} selected</span>
-            </div>
-            <div className="pill-row">
-              <button className="mini-button" type="button" onClick={() => setSelectedPlayIds([])}>
-                Clear selection
-              </button>
-              {selectedCorrectionPlays[0] ? (
-                <>
-                  <button
-                    className="mini-button"
-                    type="button"
-                    onClick={() => setIntent({ kind: "edit", play: selectedCorrectionPlays[0] })}
-                  >
-                    Edit first selected
-                  </button>
-                  <button
-                    className="mini-button"
-                    type="button"
-                    onClick={() => setIntent({ kind: "insert", beforePlay: selectedCorrectionPlays[0] })}
-                  >
-                    Insert before first
-                  </button>
-                  <button
-                    className="mini-button"
-                    type="button"
-                    onClick={() => setSelectedReviewPlayId(selectedCorrectionPlays[0].playId)}
-                  >
-                    Review first
-                  </button>
-                </>
-              ) : null}
-            </div>
-            <div className="table-like">
-              {selectedCorrectionPlays.length === 0 ? (
-                <div className="kicker">Select plays from the full log explorer to build a correction queue.</div>
-              ) : (
-                selectedCorrectionPlays.map((item) => (
-                  <div className="timeline-card" key={`selected-${item.playId}`}>
-                    <div className="timeline-top">
-                      <strong>{item.summary}</strong>
-                      <span className="mono">
-                        Q{item.quarter} {formatClock(item.clockSeconds)} | {item.sequence}
-                      </span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </section>
-        ) : null}
-
-        {!compactMode ? (
-          <section className="section-card pad-lg stack-md">
-            <div className="entry-header">
-              <h2 style={{ margin: 0 }}>Live oversight</h2>
-              <span className="chip">{snapshot.possessionSummary.length} recent possessions</span>
-            </div>
-            <div className="three-column">
-              <div className="section-card stack-sm" style={{ padding: 18 }}>
-                <strong>Last score</strong>
-                <p className="kicker" style={{ margin: 0 }}>
-                  {snapshot.lastScoringPlay?.summary ?? "No scoring play yet."}
-                </p>
-              </div>
-              <div className="section-card stack-sm" style={{ padding: 18 }}>
-                <strong>Last turnover</strong>
-                <p className="kicker" style={{ margin: 0 }}>
-                  {snapshot.lastTurnoverPlay?.summary ?? "No possession swing logged yet."}
-                </p>
-              </div>
-              <div className="section-card stack-sm" style={{ padding: 18 }}>
-                <strong>Last penalty</strong>
-                <p className="kicker" style={{ margin: 0 }}>
-                  {snapshot.lastPenaltyPlay?.summary ?? "No penalties in the visible log."}
-                </p>
-              </div>
-            </div>
-            <div className="pill-row">
-              {snapshot.possessionSummary.map((item) => (
-                <span className="chip" key={item.id}>
-                  {(item.side === "home" ? snapshot.homeTeam : snapshot.awayTeam)} | {item.playCount} plays | {driveResultLabel(item.result)}
-                </span>
-              ))}
-            </div>
-          </section>
-        ) : null}
-
-        {!compactMode && showInternalReview ? (
-          <section className="three-column">
-            <section className="section-card pad-lg stack-md">
-              <div className="entry-header">
-                <h2 style={{ margin: 0 }}>Turnover tracker</h2>
-                <span className="chip">{snapshot.turnoverTracker.length}</span>
-              </div>
-              <div className="table-like">
-                {snapshot.turnoverTracker.slice(0, 6).map((item) => (
-                  <div className="timeline-card" key={`turnover-${item.playId}`}>
-                    <div className="timeline-top">
-                      <strong>{item.summary}</strong>
-                      <span className="mono">{item.sequence}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-            <section className="section-card pad-lg stack-md">
-              <div className="entry-header">
-                <h2 style={{ margin: 0 }}>Penalty tracker</h2>
-                <span className="chip">{snapshot.penaltyTracker.length}</span>
-              </div>
-              <div className="table-like">
-                {snapshot.penaltyTracker.slice(0, 6).map((item) => (
-                  <div className="timeline-card" key={`penalty-${item.playId}`}>
-                    <div className="timeline-top">
-                      <strong>{item.summary}</strong>
-                      <span className="mono">{item.sequence}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-            <PlayReviewPanel
-              play={selectedReviewPlay}
-              review={selectedReviewPlay ? reviewByPlayId.get(selectedReviewPlay.playId) ?? null : null}
-              onSave={savePlayReview}
-              onDelete={deletePlayReview}
-            />
-          </section>
-        ) : null}
-
-        <section className="section-card pad-lg stack-md">
-          <div className="entry-header">
-            <h2 style={{ margin: 0 }}>Recent plays</h2>
-            <div className="pill-row">
-              <button className="mini-button" type="button" onClick={() => setIntent({ kind: "append" })}>
-                Fresh play
-              </button>
-              {canUndoLastPlay && latestPlay ? (
-                <button className="mini-button" type="button" onClick={() => void deletePlay(latestPlay.playId)}>
-                  Undo last
-                </button>
-              ) : null}
-              {latestPlay ? (
-                <button className="mini-button" type="button" onClick={() => setIntent({ kind: "edit", play: latestPlay })}>
-                  Edit last
-                </button>
-              ) : null}
-              {latestPlay ? (
-                <button className="mini-button" type="button" onClick={() => setIntent({ kind: "insert", beforePlay: latestPlay })}>
-                  Insert before last
-                </button>
-              ) : null}
-              <span className="chip">{snapshot.recentPlays.length} visible</span>
-            </div>
-          </div>
-          <div className="table-like">
-            {snapshot.recentPlays.length === 0 ? (
-              <div className="kicker">No plays logged yet. Start with the next live snap.</div>
-            ) : null}
-            {snapshot.recentPlays.map((item, index) => (
-              <div className="timeline-card" key={item.playId}>
-                <div className="timeline-top">
-                  <span className="mono">
-                    Q{item.quarter} {formatClock(item.clockSeconds)}
-                  </span>
-                  <span className="mono">{item.sequence}</span>
-                </div>
-                <strong>{item.summary}</strong>
-                <div className="timeline-meta">
-                  <span>{item.playType.replaceAll("_", " ")}</span>
-                  <span>
-                    {item.state.down}&amp;{item.state.distance} {item.state.ballOn.side === "home" ? "own" : "opp"}{" "}
-                    {item.state.ballOn.yardLine}
-                  </span>
-                </div>
-                <div className="timeline-actions">
-                  {index === 0 ? (
-                    <>
-                      <button className="mini-button" type="button" onClick={() => setIntent({ kind: "edit", play: item })}>
-                        Edit last
-                      </button>
-                      {canUndoLastPlay ? (
-                        <button className="mini-button" type="button" onClick={() => void deletePlay(item.playId)}>
-                          Delete last
-                        </button>
-                      ) : null}
-                    </>
-                  ) : null}
-                  <button className="mini-button" type="button" onClick={() => setIntent({ kind: "insert", beforePlay: item })}>
-                    Insert before
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="section-card pad-lg stack-md">
-          <h2 style={{ margin: 0 }}>Scoring summary</h2>
-          <div className="table-like">
-            {snapshot.scoringSummary.length === 0 ? <div className="kicker">No scoring plays yet.</div> : null}
-            {snapshot.scoringSummary.map((item) => (
-              <div className="timeline-card" key={`score-${item.playId}`}>
-                <div className="timeline-top">
-                  <span className="mono">Q{item.quarter}</span>
-                  <span className="mono">
-                    {item.state.score.away}-{item.state.score.home}
-                  </span>
-                </div>
-                <strong>{item.summary}</strong>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {showDriveSummary ? (
-          <section className="section-card pad-lg stack-md">
-            <div className="entry-header">
-              <h2 style={{ margin: 0 }}>Drive summary</h2>
-              <span className="chip">{snapshot.driveSummaries.length} drives</span>
-            </div>
-            <div className="table-like">
-              {snapshot.driveSummaries.length === 0 ? <div className="kicker">Drives will appear as plays are logged.</div> : null}
-              {snapshot.driveSummaries.map((drive) => (
-                <div className="timeline-card" key={drive.id}>
-                  <div className="timeline-top">
-                    <strong>{drive.side === "home" ? snapshot.homeTeam : snapshot.awayTeam}</strong>
-                    <span className="mono">Q{drive.quarter}</span>
-                  </div>
-                  <div className="timeline-meta">
-                    <span>
-                      {drive.startFieldPosition} to {drive.endFieldPosition}
-                    </span>
-                    <span className="mono">{driveResultLabel(drive.result)}</span>
-                  </div>
-                  <div className="pill-row">
-                    <span className="chip">{drive.playCount} plays</span>
-                    <span className="chip">{drive.yardsGained} yards</span>
-                    <span className="chip">{formatClock(drive.timeConsumedSeconds)} used</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        ) : null}
-
-        {showInternalReview ? (
-          <section className="section-card pad-lg stack-md">
-            <div className="entry-header">
-              <h2 style={{ margin: 0 }}>Full play log explorer</h2>
-              <span className="chip">{snapshot.fullPlayLog.length} tracked plays</span>
-            </div>
-            <div className="table-like">
-              {snapshot.fullPlayLog.map((item) => {
-                const review = reviewByPlayId.get(item.playId);
-                return (
-                  <div className="timeline-card" key={`full-${item.playId}`}>
-                    <div className="timeline-top">
-                      <strong>{item.summary}</strong>
-                      <span className="mono">
-                        Q{item.quarter} {formatClock(item.clockSeconds)} | {item.sequence}
-                      </span>
-                    </div>
-                    <div className="pill-row">
-                      <span className="chip">
-                        {item.state.down}&amp;{item.state.distance} {item.state.ballOn.side === "home" ? "own" : "opp"}{" "}
-                        {item.state.ballOn.yardLine}
-                      </span>
-                      {review?.tags.map((tag) => (
-                        <span className="chip" key={`${item.playId}-${tag}`}>
-                          {tag}
-                        </span>
-                      ))}
-                      {review?.filmUrl ? <span className="chip">film linked</span> : null}
-                    </div>
-                    <div className="timeline-actions">
-                      <button className="mini-button" type="button" onClick={() => setIntent({ kind: "edit", play: item })}>
-                        Edit play
-                      </button>
-                      <button className="mini-button" type="button" onClick={() => setIntent({ kind: "insert", beforePlay: item })}>
-                        Insert before
-                      </button>
-                      <button className="mini-button" type="button" onClick={() => setSelectedReviewPlayId(item.playId)}>
-                        Review / film
-                      </button>
-                      <button className="mini-button" type="button" onClick={() => toggleSelectedPlay(item.playId)}>
-                        {selectedPlayIds.includes(item.playId) ? "Unqueue" : "Queue fix"}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        ) : null}
-      </div>
-    </section>
+  const playEntryPanel = (
+    <PlayEntryPanel
+      snapshot={snapshot}
+      intent={intent}
+      disabled={!canWrite}
+      viewerMode={!canWrite}
+      submitting={isPending}
+      compactMode={compactMode}
+      storageKey={`game-day-play-entry-collapsed:${gameId}`}
+      onSubmit={submitPlay}
+      onCancelIntent={() => setIntent({ kind: "append" })}
+    />
   );
+
+  const sharedProps = {
+    gameId,
+    record,
+    snapshot,
+    session,
+    statusText,
+    errorText,
+    busyAction,
+    pendingMutations,
+    isOffline,
+    compactMode,
+    hasDeviceKey: Boolean(deviceKey),
+    canUndoLastPlay,
+    latestSituationCorrection,
+    situationCorrections,
+    playEntryPanel,
+    onToggleCompactMode: () => setCompactMode((current) => !current),
+    onFreshPlay: () => setIntent({ kind: "append" }),
+    onUndoLast: () => {
+      if (latestPlay) {
+        void deletePlay(latestPlay.playId);
+      }
+    },
+    onEditPlay: (play: GameDayPlayView) => setIntent({ kind: "edit", play }),
+    onInsertBefore: (play: GameDayPlayView) => setIntent({ kind: "insert", beforePlay: play }),
+    onRefresh: () => void refreshLiveSnapshot(),
+    onRetrySync: () => {
+      if (deviceKey) {
+        void flushOutbox(deviceKey);
+      }
+    },
+    onReleaseWriter: () => void releaseWriterLease(),
+    onReacquireWriter: () => void reacquireWriterLease(),
+    onRecoverSituation: recoverSituation,
+    onVoidSituationCorrection: voidSituationCorrectionAction
+  };
+
+  return surface === "live" ? <LiveEntryCenter {...sharedProps} /> : <LiveGameCenter {...sharedProps} />;
 }

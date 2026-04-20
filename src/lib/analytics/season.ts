@@ -19,16 +19,6 @@ function isConverted(result: GameReportDocument["fullTimeline"][number]) {
   return result.result.finalState.down === 1 && !result.result.baseResult.metadata.scoringTeam;
 }
 
-function inRedZone(result: GameReportDocument["fullTimeline"][number]) {
-  const previous = result.result.baseResult.metadata.previousSpot;
-  return previous.side === "away" && previous.yardLine <= 20;
-}
-
-function inGoalToGo(result: GameReportDocument["fullTimeline"][number]) {
-  const previous = result.result.baseResult.metadata.previousSpot;
-  return previous.side === "away" && previous.yardLine <= 10;
-}
-
 function isExplosive(result: GameReportDocument["fullTimeline"][number]) {
   const summary = result.result.summary.toLowerCase();
   const payload = result.result.play.payload as Record<string, unknown>;
@@ -63,6 +53,18 @@ function parseFieldPosition(value: string) {
   }
 
   return side === "own" ? yardLine : 100 - yardLine;
+}
+
+function teamStat(
+  report: GameReportDocument,
+  primarySide: "home" | "away",
+  stat: StatType
+) {
+  return report.stats.teamTotals[primarySide][stat] ?? 0;
+}
+
+function totalYards(report: GameReportDocument, primarySide: "home" | "away") {
+  return teamStat(report, primarySide, "rushing_yards") + teamStat(report, primarySide, "passing_yards");
 }
 
 const leaderStats: Array<{ title: string; stat: StatType }> = [
@@ -100,6 +102,13 @@ export function buildSeasonAnalyticsDocument(params: {
     wins: 0,
     losses: 0,
     ties: 0,
+    firstDowns: 0,
+    totalYards: 0,
+    rushingYards: 0,
+    passingYards: 0,
+    thirdDownAttempts: 0,
+    thirdDownConversions: 0,
+    redZoneTrips: 0,
     totalPlays: 0,
     totalDrives: 0
   };
@@ -165,10 +174,28 @@ export function buildSeasonAnalyticsDocument(params: {
       primarySide === "home" ? report.currentState.score.home : report.currentState.score.away;
     const pointsAgainst =
       primarySide === "home" ? report.currentState.score.away : report.currentState.score.home;
+    const firstDowns = teamStat(report, primarySide, "first_down");
+    const rushingYards = teamStat(report, primarySide, "rushing_yards");
+    const passingYards = teamStat(report, primarySide, "passing_yards");
+    const totalOffense = totalYards(report, primarySide);
+    const thirdDownAttempts = teamStat(report, primarySide, "third_down_attempt");
+    const thirdDownConversions = teamStat(report, primarySide, "third_down_conversion");
+    const redZoneTrips = teamStat(report, primarySide, "red_zone_trip");
+    const redZoneScores = teamStat(report, primarySide, "red_zone_score");
+    const goalToGoTrips = teamStat(report, primarySide, "goal_to_go_trip");
+    const goalToGoScores = teamStat(report, primarySide, "goal_to_go_score");
+
     summary.pointsFor += pointsFor;
     summary.pointsAgainst += pointsAgainst;
     summary.totalPlays += report.fullTimeline.length;
     summary.totalDrives += report.driveSummaries.length;
+    summary.firstDowns += firstDowns;
+    summary.totalYards += totalOffense;
+    summary.rushingYards += rushingYards;
+    summary.passingYards += passingYards;
+    summary.thirdDownAttempts += thirdDownAttempts;
+    summary.thirdDownConversions += thirdDownConversions;
+    summary.redZoneTrips += redZoneTrips;
     if (pointsFor > pointsAgainst) summary.wins += 1;
     else if (pointsFor < pointsAgainst) summary.losses += 1;
     else summary.ties += 1;
@@ -209,14 +236,8 @@ export function buildSeasonAnalyticsDocument(params: {
         redZoneScores: 0
       };
 
-    let thirdDownAttempts = 0;
-    let thirdDownConversions = 0;
     let fourthDownAttempts = 0;
     let fourthDownConversions = 0;
-    let redZoneTrips = 0;
-    let redZoneScores = 0;
-    let goalToGoTrips = 0;
-    let goalToGoScores = 0;
     let explosivePlays = 0;
 
     for (const item of report.fullTimeline) {
@@ -224,31 +245,10 @@ export function buildSeasonAnalyticsDocument(params: {
         continue;
       }
 
-      if (isThirdDown(item)) {
-        thirdDownAttempts += 1;
-        if (isConverted(item)) {
-          thirdDownConversions += 1;
-        }
-      }
-
       if (isFourthDown(item)) {
         fourthDownAttempts += 1;
         if (isConverted(item)) {
           fourthDownConversions += 1;
-        }
-      }
-
-      if (inRedZone(item)) {
-        redZoneTrips += 1;
-        if (item.result.baseResult.metadata.scoringTeam === primarySide) {
-          redZoneScores += 1;
-        }
-      }
-
-      if (inGoalToGo(item)) {
-        goalToGoTrips += 1;
-        if (item.result.baseResult.metadata.scoringTeam === primarySide) {
-          goalToGoScores += 1;
         }
       }
 
@@ -404,8 +404,10 @@ export function buildSeasonAnalyticsDocument(params: {
       label: opponentLabel,
       pointsFor,
       pointsAgainst,
+      firstDowns,
       turnoverMargin: turnoverDelta(report),
       explosivePlays,
+      thirdDownAttempts,
       thirdDownConversions,
       redZoneTrips
     };

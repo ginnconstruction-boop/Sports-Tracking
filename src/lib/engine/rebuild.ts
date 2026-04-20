@@ -19,6 +19,8 @@ import type {
   SackPlayPayload,
   TeamSide
 } from "@/lib/domain/play-log";
+import type { GameStateCorrection } from "@/lib/domain/state-corrections";
+import type { StatProjection, StatType } from "@/lib/domain/stats";
 import { buildPlaySummary } from "@/lib/engine/summary";
 import { compareSequence, isSequenceOnOrAfter } from "@/lib/engine/sequence";
 import { accumulateStatProjection, projectStatCreditsFromPlay } from "@/lib/engine/stats";
@@ -41,8 +43,163 @@ export const INITIAL_GAME_STATE: DerivedGameState = {
   sequenceApplied: "0"
 };
 
+function addTeamTotal(
+  totals: Record<TeamSide, Partial<Record<StatType, number>>>,
+  side: TeamSide,
+  stat: StatType,
+  value: number
+) {
+  totals[side][stat] = (totals[side][stat] ?? 0) + value;
+}
+
+function mergeStatProjection(base: StatProjection, teamAdditions: Record<TeamSide, Partial<Record<StatType, number>>>) {
+  const merged: StatProjection = {
+    playerTotals: base.playerTotals,
+    teamTotals: {
+      home: { ...base.teamTotals.home },
+      away: { ...base.teamTotals.away }
+    }
+  };
+
+  for (const side of ["home", "away"] as const) {
+    for (const [stat, value] of Object.entries(teamAdditions[side])) {
+      if (value === undefined) {
+        continue;
+      }
+
+      const typedStat = stat as StatType;
+      merged.teamTotals[side][typedStat] = (merged.teamTotals[side][typedStat] ?? 0) + value;
+    }
+  }
+
+  return merged;
+}
+
+function deriveTeamSituationalStats(timeline: RebuildTimelineItem[]) {
+  const totals: Record<TeamSide, Partial<Record<StatType, number>>> = {
+    home: {},
+    away: {}
+  };
+
+  let activePossessionSide: TeamSide | null = null;
+  let countedRedZoneForPossession = false;
+  let countedRedZoneScoreForPossession = false;
+  let countedGoalToGoForPossession = false;
+  let countedGoalToGoScoreForPossession = false;
+  let previousFinalPhase: DerivedGameState["phase"] | null = null;
+
+  for (const item of timeline) {
+    const { play, baseResult, finalState } = item.result;
+    const offense = play.possession;
+    const acceptedPenalties = play.penalties.filter((penalty) => penalty.result === "accepted");
+    const hasOffsettingPenalty = play.penalties.some((penalty) => penalty.result === "offsetting");
+    const hasNoPlayPenalty = acceptedPenalties.some((penalty) => penalty.noPlay);
+    const automaticFirstDown = acceptedPenalties.some((penalty) => penalty.automaticFirstDown);
+    const startsNewPossession =
+      activePossessionSide === null ||
+      offense !== activePossessionSide ||
+      previousFinalPhase !== "normal";
+
+    if (startsNewPossession) {
+      countedRedZoneForPossession = false;
+      countedRedZoneScoreForPossession = false;
+      countedGoalToGoForPossession = false;
+      countedGoalToGoScoreForPossession = false;
+    }
+
+    const legalDownPlay = !hasOffsettingPenalty && !hasNoPlayPenalty;
+    const playStartedInNormalPhase = baseResult.metadata.phaseBeforePlay === "normal";
+    const offenseKeptBall =
+      finalState.phase === "normal" &&
+      finalState.possession === offense &&
+      !baseResult.metadata.possessionChanged;
+    const earnedFirstDown =
+      playStartedInNormalPhase &&
+      offenseKeptBall &&
+      finalState.down === 1 &&
+      (baseResult.firstDownAchieved || automaticFirstDown);
+
+    if (earnedFirstDown) {
+      addTeamTotal(totals, offense, "first_down", 1);
+    }
+
+    const thirdDownAttempt =
+      playStartedInNormalPhase &&
+      baseResult.metadata.downBeforePlay === 3 &&
+      legalDownPlay;
+
+    if (thirdDownAttempt) {
+      addTeamTotal(totals, offense, "third_down_attempt", 1);
+
+      const thirdDownConverted =
+        (offenseKeptBall && finalState.down === 1 && (baseResult.firstDownAchieved || automaticFirstDown)) ||
+        baseResult.metadata.scoringTeam === offense;
+
+      if (thirdDownConverted) {
+        addTeamTotal(totals, offense, "third_down_conversion", 1);
+      }
+    }
+
+    const startedSnapInRedZone =
+      playStartedInNormalPhase &&
+      legalDownPlay &&
+      baseResult.metadata.previousSpot.side !== offense &&
+      baseResult.metadata.previousSpot.yardLine <= 20;
+
+    if (startedSnapInRedZone && !countedRedZoneForPossession) {
+      addTeamTotal(totals, offense, "red_zone_trip", 1);
+      countedRedZoneForPossession = true;
+    }
+
+    const startedSnapInGoalToGo =
+      playStartedInNormalPhase &&
+      legalDownPlay &&
+      baseResult.metadata.previousSpot.side !== offense &&
+      baseResult.metadata.previousSpot.yardLine <= 10;
+
+    if (startedSnapInGoalToGo && !countedGoalToGoForPossession) {
+      addTeamTotal(totals, offense, "goal_to_go_trip", 1);
+      countedGoalToGoForPossession = true;
+    }
+
+    const offenseScoredOnLegalPlay =
+      legalDownPlay && baseResult.metadata.scoringTeam === offense;
+
+    if (offenseScoredOnLegalPlay && countedRedZoneForPossession && !countedRedZoneScoreForPossession) {
+      addTeamTotal(totals, offense, "red_zone_score", 1);
+      countedRedZoneScoreForPossession = true;
+    }
+
+    if (offenseScoredOnLegalPlay && countedGoalToGoForPossession && !countedGoalToGoScoreForPossession) {
+      addTeamTotal(totals, offense, "goal_to_go_score", 1);
+      countedGoalToGoScoreForPossession = true;
+    }
+
+    activePossessionSide = offense;
+    previousFinalPhase = finalState.phase;
+  }
+
+  return totals;
+}
+
 function clampYardLine(yardLine: number) {
   return Math.min(99, Math.max(1, yardLine));
+}
+
+function applySituationCorrection(
+  state: DerivedGameState,
+  correction: GameStateCorrection
+): DerivedGameState {
+  return {
+    ...state,
+    quarter: correction.quarter ?? state.quarter,
+    phase: "normal",
+    possession: correction.possession,
+    down: correction.down,
+    distance: correction.distance,
+    ballOn: correction.ballOn,
+    sequenceApplied: correction.appliesAfterSequence
+  };
 }
 
 function flipSide(side: TeamSide): TeamSide {
@@ -508,15 +665,34 @@ export function finalizePlay(previous: DerivedGameState, play: PlayRecord): Fina
 
 export function rebuildFromPlayLog(
   playLog: PlayRecord[],
-  options: PartialRebuildOptions = {}
+  options: PartialRebuildOptions & { corrections?: GameStateCorrection[] } = {}
 ): GameProjection {
   const ordered = [...playLog].sort((left, right) => compareSequence(left.sequence, right.sequence));
   const filtered = options.fromSequence
     ? ordered.filter((play) => isSequenceOnOrAfter(play.sequence, options.fromSequence!))
     : ordered;
+  const orderedCorrections = [...(options.corrections ?? [])].sort((left, right) => {
+    const bySequence = compareSequence(left.appliesAfterSequence, right.appliesAfterSequence);
+    if (bySequence !== 0) {
+      return bySequence;
+    }
+
+    const byCreatedAt = left.createdAt.localeCompare(right.createdAt);
+    if (byCreatedAt !== 0) {
+      return byCreatedAt;
+    }
+
+    return left.id.localeCompare(right.id);
+  });
+  const filteredCorrections = options.fromSequence
+    ? orderedCorrections.filter((correction) =>
+        isSequenceOnOrAfter(correction.appliesAfterSequence, options.fromSequence!)
+      )
+    : orderedCorrections;
 
   const timeline = [...(options.priorTimeline ?? [])];
   let state = options.seedState ?? INITIAL_GAME_STATE;
+  let correctionIndex = 0;
 
   for (const play of filtered) {
     const result = finalizePlay(state, play);
@@ -525,13 +701,24 @@ export function rebuildFromPlayLog(
       result
     });
     state = result.finalState;
+
+    while (
+      correctionIndex < filteredCorrections.length &&
+      compareSequence(filteredCorrections[correctionIndex]!.appliesAfterSequence, play.sequence) === 0
+    ) {
+      state = applySituationCorrection(state, filteredCorrections[correctionIndex]!);
+      timeline[timeline.length - 1]!.result.finalState = state;
+      correctionIndex += 1;
+    }
   }
 
   const allCredits = timeline.flatMap((item) => item.result.statCredits);
+  const baseStats = accumulateStatProjection(allCredits);
+  const situationalTeamTotals = deriveTeamSituationalStats(timeline);
 
   return {
     currentState: timeline.at(-1)?.result.finalState ?? state,
     timeline,
-    stats: accumulateStatProjection(allCredits)
+    stats: mergeStatProjection(baseStats, situationalTeamTotals)
   };
 }

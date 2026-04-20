@@ -36,6 +36,22 @@ async function readJson<T>(input: RequestInfo) {
   return body as T;
 }
 
+function formatThirdDownLine(made: number, attempts: number) {
+  if (attempts === 0) {
+    return "0/0";
+  }
+
+  return `${made}/${attempts}`;
+}
+
+function formatRate(made: number, attempts: number) {
+  if (attempts === 0) {
+    return "0%";
+  }
+
+  return `${((made / attempts) * 100).toFixed(1)}%`;
+}
+
 export function AnalyticsConsole({ memberships }: Props) {
   const [organizationId, setOrganizationId] = useState(memberships[0]?.organizationId ?? "");
   const [teams, setTeams] = useState<Team[]>([]);
@@ -87,6 +103,10 @@ export function AnalyticsConsole({ memberships }: Props) {
         `${analytics.summary.wins}-${analytics.summary.losses}-${analytics.summary.ties}`,
         `${analytics.summary.pointsFor} PF`,
         `${analytics.summary.pointsAgainst} PA`,
+        `${analytics.summary.firstDowns} first downs`,
+        `${analytics.summary.totalYards} total yds`,
+        `${analytics.summary.rushingYards} rush yds`,
+        `${analytics.summary.passingYards} pass yds`,
         `${analytics.summary.totalPlays} plays`,
         `${analytics.summary.totalDrives} drives`
       ]
@@ -154,7 +174,7 @@ export function AnalyticsConsole({ memberships }: Props) {
             <div className="section-card pad-lg stack-sm">
               <h3 style={{ margin: 0 }}>Situational</h3>
               <div className="pill-row">
-                <span className="chip">3rd down {analytics.situational.thirdDownConversions}/{analytics.situational.thirdDownAttempts} ({analytics.situational.thirdDownRate}%)</span>
+                <span className="chip">3rd down {formatThirdDownLine(analytics.situational.thirdDownConversions, analytics.situational.thirdDownAttempts)} ({analytics.situational.thirdDownRate}%)</span>
                 <span className="chip">4th down {analytics.situational.fourthDownConversions}/{analytics.situational.fourthDownAttempts} ({analytics.situational.fourthDownRate}%)</span>
                 <span className="chip">Red zone {analytics.situational.redZoneScores}/{analytics.situational.redZoneTrips} ({analytics.situational.redZoneRate}%)</span>
                 <span className="chip">Goal-to-go {analytics.situational.goalToGoScores}/{analytics.situational.goalToGoTrips} ({analytics.situational.goalToGoRate}%)</span>
@@ -218,7 +238,10 @@ export function AnalyticsConsole({ memberships }: Props) {
                     <div className="pill-row">
                       <span className="chip">Turnover margin {point.turnoverMargin}</span>
                       <span className="chip">Explosive {point.explosivePlays}</span>
-                      <span className="chip">3rd down conv. {point.thirdDownConversions}</span>
+                      <span className="chip">First downs {point.firstDowns}</span>
+                      <span className="chip">
+                        3rd down {formatThirdDownLine(point.thirdDownConversions, point.thirdDownAttempts)} ({formatRate(point.thirdDownConversions, point.thirdDownAttempts)})
+                      </span>
                       <span className="chip">Red zone trips {point.redZoneTrips}</span>
                     </div>
                   </div>
