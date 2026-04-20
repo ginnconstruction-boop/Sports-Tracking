@@ -75,6 +75,10 @@ const correctionTimestampFormatter = new Intl.DateTimeFormat("en-US", {
   hour: "numeric",
   minute: "2-digit"
 });
+const liveLeaseFormatter = new Intl.DateTimeFormat("en-US", {
+  hour: "numeric",
+  minute: "2-digit"
+});
 
 function formatKickoffDate(value?: string | null) {
   return value ? stableHeaderDateFormatter.format(new Date(value)) : "Date TBD";
@@ -160,6 +164,14 @@ function formatThirdDownSnapshot(snapshot: GameDaySnapshot, side: TeamSide) {
 
 function formatCorrectionTimestamp(value: string) {
   return correctionTimestampFormatter.format(new Date(value));
+}
+
+function formatWriterLeaseExpiry(value?: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  return liveLeaseFormatter.format(new Date(value));
 }
 
 function formatCorrectionSituation(correction: GameStateCorrection) {
@@ -1111,6 +1123,7 @@ export function LiveEntryCenter({
   const [awayPulse, setAwayPulse] = useState(false);
   const previousScore = useRef(snapshot.currentState.score);
   const isWriterMode = Boolean(session?.isActiveWriter);
+  const leaseExpiry = formatWriterLeaseExpiry(session?.writerLeaseExpiresAt);
   const actionFeedback = errorText
     ? "errors"
     : isOffline
@@ -1152,19 +1165,47 @@ export function LiveEntryCenter({
             <span className={`status-pill action-feedback-pill action-feedback-${actionFeedback}`}>
               {actionFeedback}
             </span>
-            {errorText ? <span className="status-pill">{errorText}</span> : null}
-            {!isWriterMode ? (
+            {isWriterMode && errorText ? <span className="status-pill">{errorText}</span> : null}
+          </div>
+        </div>
+
+        {!isWriterMode ? (
+          <section className="live-entry-viewer-banner" data-testid="live-entry-viewer-banner">
+            <div className="live-entry-viewer-copy">
+              <span className="eyebrow live-game-center-eyebrow">Read only</span>
+              <div className="live-entry-viewer-heading-row">
+                <h2 className="live-entry-viewer-title">Another writer is active</h2>
+                {leaseExpiry ? <span className="chip live-entry-viewer-chip">Lease active until {leaseExpiry}</span> : null}
+              </div>
+              <p className="live-entry-viewer-text">
+                Live Entry is read-only until writer access is acquired. Use Try writer lease to request control, return to overview, or use a fresh game for preview testing.
+              </p>
+              {errorText ? <div className="error-note live-entry-viewer-error">{errorText}</div> : null}
+              <ul className="live-entry-viewer-hints">
+                <li>Try writer lease to request control of this game.</li>
+                <li>Return to overview if you only need review and correction context.</li>
+                <li>Use a different fresh game if this shared preview game is already in use.</li>
+              </ul>
+            </div>
+            <div className="live-entry-viewer-actions" data-testid="state-correction-controls">
               <button
-                className="mini-button live-entry-toolbar-link"
+                className="button-primary live-entry-primary-cta"
+                data-testid="live-entry-try-writer"
                 disabled={!hasDeviceKey || isOffline || busyAction !== null}
                 type="button"
                 onClick={onReacquireWriter}
               >
-                Try writer lease
+                {busyAction === "lease" ? "Requesting writer lease..." : "Try writer lease"}
               </button>
-            ) : null}
-          </div>
-        </div>
+              <Link className="mini-button live-entry-viewer-secondary" href={`/games/${gameId}/gameday`}>
+                Return to overview
+              </Link>
+              <p className="live-entry-viewer-note">
+                Single-writer protection stays in place. If another session still holds the lease, this page remains read-only.
+              </p>
+            </div>
+          </section>
+        ) : null}
 
         <LiveGameHeaderBand
           record={record}
