@@ -954,19 +954,20 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
 
   const latestPlay = snapshot.recentPlays[0];
   const canWrite = Boolean(session?.isActiveWriter);
-  const playEntryPanel = (
-    <PlayEntryPanel
-      snapshot={snapshot}
-      intent={intent}
-      disabled={!canWrite}
-      viewerMode={!canWrite}
-      submitting={isPending}
-      compactMode={compactMode}
-      storageKey={`game-day-play-entry-collapsed:${gameId}`}
-      onSubmit={submitPlay}
-      onCancelIntent={() => setIntent({ kind: "append" })}
-    />
-  );
+    const playEntryPanel = (
+      <PlayEntryPanel
+        snapshot={snapshot}
+        intent={intent}
+        disabled={!canWrite}
+        viewerMode={!canWrite}
+        submitting={isPending}
+        compactMode={compactMode}
+        storageKey={`game-day-play-entry-collapsed:${gameId}`}
+        surface={surface}
+        onSubmit={submitPlay}
+        onCancelIntent={() => setIntent({ kind: "append" })}
+      />
+    );
 
   const sharedProps = {
     gameId,

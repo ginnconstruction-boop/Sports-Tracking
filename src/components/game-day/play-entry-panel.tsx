@@ -52,6 +52,7 @@ type Props = {
   submitting?: boolean;
   compactMode?: boolean;
   storageKey?: string;
+  surface?: "overview" | "live";
   viewerMode?: boolean;
   onSubmit: (submission: PlaySubmission) => Promise<void>;
   onCancelIntent: () => void;
@@ -1062,10 +1063,12 @@ export function PlayEntryPanel({
   submitting,
   compactMode,
   storageKey = "game-day-play-entry-collapsed",
+  surface = "overview",
   viewerMode = false,
   onSubmit,
   onCancelIntent
 }: Props) {
+  const isLiveSurface = surface === "live";
   const showAdvancedParticipantCapture = isFeatureEnabled("advanced_participant_capture");
   const [form, setForm] = useState<FormState>(() => createForm(snapshot));
   const [focusedField, setFocusedField] = useState<FocusField>("jerseyA");
@@ -1090,6 +1093,7 @@ export function PlayEntryPanel({
   );
   const penaltyPresets = useMemo(() => buildPenaltyPresets(form), [form]);
   const currentPlayLabel = playTypeLabel(form.playType);
+  const quickBankLimit = isLiveSurface ? 4 : 6;
 
   useEffect(() => {
     try {
@@ -1386,15 +1390,24 @@ export function PlayEntryPanel({
   }
 
   return (
-    <section className="section-card pad-lg stack-md play-entry-shell" data-testid="play-entry-shell">
-      <div className="entry-header">
-        <div>
+    <section
+      className={isLiveSurface ? "section-card pad-lg stack-md play-entry-shell play-entry-shell-live" : "section-card pad-lg stack-md play-entry-shell"}
+      data-testid="play-entry-shell"
+    >
+      <div className={isLiveSurface ? "entry-header play-entry-header play-entry-header-live" : "entry-header play-entry-header"}>
+        <div className="play-entry-header-copy">
           <div className="eyebrow play-entry-eyebrow">Live entry</div>
           <h2 style={{ margin: "10px 0 0" }}>Play Entry</h2>
           <p className="kicker">{intent.kind === "edit" ? `Editing ${intent.play.sequence}` : intent.kind === "insert" ? `Insert before ${intent.beforePlay.sequence}` : "Append next play"} at sequence {sequence}.</p>
+          {isLiveSurface ? (
+            <div className="play-entry-header-meta">
+              <span className="chip">{currentPlayLabel}</span>
+              <span className="chip">{form.possession === "home" ? "Home ball" : "Visitor ball"}</span>
+            </div>
+          ) : null}
         </div>
         {!viewerMode ? (
-          <div className="timeline-actions">
+          <div className="timeline-actions play-entry-header-actions">
             {intent.kind !== "append" ? <button className="button-secondary button-secondary-light" type="button" onClick={onCancelIntent}>Cancel</button> : null}
             <button className="button-secondary button-secondary-light" data-testid="play-entry-toggle" type="button" onClick={() => setEntryCollapsed((current) => !current)}>
               {entryCollapsed ? "Open entry" : "Collapse entry"}
@@ -1404,15 +1417,20 @@ export function PlayEntryPanel({
       </div>
 
       {viewerMode ? (
-        <section className="collapsed-entry-card stack-md play-entry-viewer-state" data-testid="play-entry-viewer-state">
-          <div className="entry-header">
-            <div className="stack-sm">
-              <strong>Viewer mode</strong>
-              <p className="kicker" style={{ margin: 0 }}>
-                Another writer is active. Review live state and recent plays, or use Try writer lease to take control.
-              </p>
-            </div>
-            <span className="chip">Live review</span>
+          <section
+            className={isLiveSurface ? "collapsed-entry-card stack-md play-entry-viewer-state play-entry-viewer-state-live" : "collapsed-entry-card stack-md play-entry-viewer-state"}
+            data-testid="play-entry-viewer-state"
+          >
+            <div className="entry-header">
+              <div className="stack-sm">
+                <strong>Viewer mode</strong>
+                <p className="kicker" style={{ margin: 0 }}>
+                  {isLiveSurface
+                    ? "Live entry stays locked until this device becomes the active writer."
+                    : "Another writer is active. Review live state and recent plays, or use Try writer lease to take control."}
+                </p>
+              </div>
+              <span className="chip">Live review</span>
           </div>
         </section>
       ) : entryCollapsed ? (
@@ -1434,7 +1452,7 @@ export function PlayEntryPanel({
         <>
 
         <section className="play-entry-command-deck">
-          <div className="stack-sm play-entry-stage play-entry-stage-primary">
+            <div className="stack-sm play-entry-stage play-entry-stage-primary play-entry-type-shell">
             <div className="entry-header">
               <div>
                 <strong>Play type</strong>
@@ -1481,13 +1499,16 @@ export function PlayEntryPanel({
               <div className="participant-field-grid play-entry-role-grid">
                 {primaryParticipantFields.map(renderParticipantField)}
               </div>
-              <div className="player-bank play-entry-quick-bank">
-                <strong>Recent offense</strong>
-                <div className="pill-row">
-                  {quickOffense.slice(0, 6).map((entry) => (
-                    <button className="chip-button" key={entry.id} type="button" onClick={() => addQuick(entry.jerseyNumber)}>
-                      #{entry.jerseyNumber} {entry.displayName}
-                    </button>
+                <div className="player-bank play-entry-quick-bank">
+                  <div className="entry-header">
+                    <strong>Quick offense</strong>
+                    {isLiveSurface ? <span className="chip">Tap jersey</span> : null}
+                  </div>
+                  <div className="pill-row">
+                    {quickOffense.slice(0, quickBankLimit).map((entry) => (
+                      <button className="chip-button" key={entry.id} type="button" onClick={() => addQuick(entry.jerseyNumber)}>
+                        #{entry.jerseyNumber} {entry.displayName}
+                      </button>
                   ))}
                 </div>
               </div>
@@ -1547,11 +1568,11 @@ export function PlayEntryPanel({
           <div className="participant-field-grid play-entry-role-grid">
             {defensiveParticipantFields.map(renderParticipantField)}
           </div>
-          <div className="pill-row play-entry-quick-defense">
-            {quickDefense.slice(0, 6).map((entry) => (
-              <button className="chip-button" key={entry.id} type="button" onClick={() => addQuick(entry.jerseyNumber)}>
-                #{entry.jerseyNumber} {entry.displayName}
-              </button>
+            <div className="pill-row play-entry-quick-defense">
+              {quickDefense.slice(0, quickBankLimit).map((entry) => (
+                <button className="chip-button" key={entry.id} type="button" onClick={() => addQuick(entry.jerseyNumber)}>
+                  #{entry.jerseyNumber} {entry.displayName}
+                </button>
             ))}
           </div>
         </section>

@@ -1216,16 +1216,18 @@ export function LiveEntryCenter({
         />
       </div>
 
-      <section className="live-entry-main-panel">
-        {playEntryPanel}
-      </section>
+      <section className="live-entry-workspace" data-mode={isWriterMode ? "writer" : "viewer"}>
+        <section className="live-entry-main-panel">
+          {playEntryPanel}
+        </section>
 
-      <LiveEntryRecentStrip
-        plays={snapshot.recentPlays.slice(0, 3)}
-        canUndoLastPlay={canUndoLastPlay}
-        canWrite={isWriterMode}
-        onUndoLast={onUndoLast}
-      />
+        <LiveEntryRecentStrip
+          plays={snapshot.recentPlays.slice(0, 3)}
+          canUndoLastPlay={canUndoLastPlay}
+          canWrite={isWriterMode}
+          onUndoLast={onUndoLast}
+        />
+      </section>
 
       <div className="live-entry-footer-note">
         <strong>{statusText}</strong>
