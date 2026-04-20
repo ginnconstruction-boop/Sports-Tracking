@@ -1200,6 +1200,9 @@ export function LiveEntryCenter({
               <Link className="mini-button live-entry-viewer-secondary" href={`/games/${gameId}/gameday`}>
                 Return to overview
               </Link>
+              <Link className="mini-button live-entry-viewer-secondary" href="/games#fresh-live-entry">
+                Create fresh game
+              </Link>
               <p className="live-entry-viewer-note">
                 Single-writer protection stays in place. If another session still holds the lease, this page remains read-only.
               </p>

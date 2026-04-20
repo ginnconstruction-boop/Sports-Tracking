@@ -41,8 +41,33 @@ type GameListItem = {
 };
 
 type GameRow = GameListItem & {
+  organizationId: string;
   organizationName: string;
   teamName: string;
+  seasonLabel: string;
+  seasonYear: number;
+};
+
+type Opponent = {
+  id: string;
+  organizationId: string;
+  schoolName: string;
+};
+
+type Venue = {
+  id: string;
+  organizationId: string;
+  name: string;
+  city?: string | null;
+  state?: string | null;
+};
+
+type SeasonOption = {
+  id: string;
+  teamId: string;
+  teamName: string;
+  organizationId: string;
+  organizationName: string;
   seasonLabel: string;
   seasonYear: number;
 };
@@ -80,6 +105,15 @@ function renderKickoff(value?: string | null) {
 export function GamesPageConsole() {
   const [statusText, setStatusText] = useState("Loading games...");
   const [games, setGames] = useState<GameRow[]>([]);
+  const [seasonOptions, setSeasonOptions] = useState<SeasonOption[]>([]);
+  const [opponentsByOrganization, setOpponentsByOrganization] = useState<Record<string, Opponent[]>>({});
+  const [venuesByOrganization, setVenuesByOrganization] = useState<Record<string, Venue[]>>({});
+  const [freshSeasonId, setFreshSeasonId] = useState("");
+  const [freshOpponentId, setFreshOpponentId] = useState("");
+  const [freshVenueId, setFreshVenueId] = useState("");
+  const [freshHomeAway, setFreshHomeAway] = useState<"home" | "away">("home");
+  const [freshSubmitting, setFreshSubmitting] = useState(false);
+  const [freshError, setFreshError] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -102,17 +136,53 @@ export function GamesPageConsole() {
           return seasons.items.map((season) => ({
             ...season,
             teamName: team.name,
+            organizationId: team.organizationId,
             organizationName: team.organizationName
           }));
         })
       );
 
       const seasons = seasonResponses.flat();
+      setSeasonOptions(
+        seasons.map((season) => ({
+          id: season.id,
+          teamId: season.teamId,
+          teamName: season.teamName,
+          organizationId: season.organizationId,
+          organizationName: season.organizationName,
+          seasonLabel: season.label,
+          seasonYear: season.year
+        }))
+      );
+
+      const uniqueOrganizationIds = Array.from(new Set(teams.map((team) => team.organizationId)));
+      const [opponentResponses, venueResponses] = await Promise.all([
+        Promise.all(
+          uniqueOrganizationIds.map(async (organizationId) => ({
+            organizationId,
+            items: (await readJson<{ items: Opponent[] }>(`/api/v1/opponents?organizationId=${organizationId}`)).items
+          }))
+        ),
+        Promise.all(
+          uniqueOrganizationIds.map(async (organizationId) => ({
+            organizationId,
+            items: (await readJson<{ items: Venue[] }>(`/api/v1/venues?organizationId=${organizationId}`)).items
+          }))
+        )
+      ]);
+
+      setOpponentsByOrganization(
+        Object.fromEntries(opponentResponses.map((response) => [response.organizationId, response.items]))
+      );
+      setVenuesByOrganization(
+        Object.fromEntries(venueResponses.map((response) => [response.organizationId, response.items]))
+      );
       const gameResponses = await Promise.all(
         seasons.map(async (season) => {
           const rows = await readJson<{ items: GameListItem[] }>(`/api/v1/games?seasonId=${season.id}`);
           return rows.items.map((item) => ({
             ...item,
+            organizationId: season.organizationId,
             organizationName: season.organizationName,
             teamName: season.teamName,
             seasonLabel: season.label,
@@ -133,6 +203,74 @@ export function GamesPageConsole() {
       setStatusText(nextGames.length > 0 ? "Games ready." : "No games scheduled yet.");
     })().catch((error) => setStatusText(error instanceof Error ? error.message : "Unable to load games."));
   }, []);
+
+  useEffect(() => {
+    if (!freshSeasonId && seasonOptions.length > 0) {
+      setFreshSeasonId(seasonOptions[0].id);
+    }
+  }, [freshSeasonId, seasonOptions]);
+
+  const selectedSeason = useMemo(
+    () => seasonOptions.find((option) => option.id === freshSeasonId) ?? null,
+    [freshSeasonId, seasonOptions]
+  );
+  const availableOpponents = selectedSeason ? opponentsByOrganization[selectedSeason.organizationId] ?? [] : [];
+  const availableVenues = selectedSeason ? venuesByOrganization[selectedSeason.organizationId] ?? [] : [];
+
+  useEffect(() => {
+    if (availableOpponents.length === 0) {
+      setFreshOpponentId("");
+      return;
+    }
+
+    if (!availableOpponents.some((item) => item.id === freshOpponentId)) {
+      setFreshOpponentId(availableOpponents[0].id);
+    }
+  }, [availableOpponents, freshOpponentId]);
+
+  useEffect(() => {
+    if (availableVenues.length === 0) {
+      setFreshVenueId("");
+      return;
+    }
+
+    if (freshVenueId && availableVenues.some((item) => item.id === freshVenueId)) {
+      return;
+    }
+
+    setFreshVenueId(availableVenues[0].id);
+  }, [availableVenues, freshVenueId]);
+
+  async function createFreshLiveEntryGame() {
+    if (!selectedSeason || !freshOpponentId) {
+      setFreshError("Choose a season and opponent first.");
+      return;
+    }
+
+    setFreshSubmitting(true);
+    setFreshError(null);
+
+    try {
+      const kickoffAt = new Date(Date.now() + 5 * 60_000).toISOString();
+      const response = await readJson<{ item: { id: string } }>("/api/v1/games", {
+        method: "POST",
+        body: JSON.stringify({
+          seasonId: selectedSeason.id,
+          opponentId: freshOpponentId,
+          venueId: freshVenueId || undefined,
+          kickoffAt,
+          homeAway: freshHomeAway,
+          status: "in_progress"
+        })
+      });
+
+      window.location.href = `/games/${response.item.id}/live`;
+    } catch (error) {
+      setFreshError(error instanceof Error ? error.message : "Unable to create a fresh game.");
+    } finally {
+      setFreshSubmitting(false);
+    }
+  }
 
   const grouped = useMemo(() => {
     const map = new Map<
@@ -177,6 +315,65 @@ export function GamesPageConsole() {
           </div>
           <span className="chip">{statusText}</span>
         </div>
+
+        <section className="section-card pad-md stack-md fresh-live-entry-panel" id="fresh-live-entry">
+          <div className="entry-header">
+            <div>
+              <h2 style={{ margin: 0 }}>Fresh Live Entry game</h2>
+              <p className="kicker" style={{ margin: "6px 0 0" }}>
+                Create a brand new in-progress game and jump straight into Live Entry without fighting a shared writer lease.
+              </p>
+            </div>
+            <span className="chip">Best for preview testing</span>
+          </div>
+          <div className="form-grid fresh-live-entry-grid">
+            <label className="field">
+              <span>Season</span>
+              <select value={freshSeasonId} onChange={(event) => setFreshSeasonId(event.target.value)}>
+                {seasonOptions.map((season) => (
+                  <option key={season.id} value={season.id}>
+                    {season.seasonLabel} - {season.teamName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Opponent</span>
+              <select value={freshOpponentId} onChange={(event) => setFreshOpponentId(event.target.value)}>
+                {availableOpponents.map((opponent) => (
+                  <option key={opponent.id} value={opponent.id}>
+                    {opponent.schoolName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Venue</span>
+              <select value={freshVenueId} onChange={(event) => setFreshVenueId(event.target.value)}>
+                <option value="">Venue optional</option>
+                {availableVenues.map((venue) => (
+                  <option key={venue.id} value={venue.id}>
+                    {venue.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Team side</span>
+              <select value={freshHomeAway} onChange={(event) => setFreshHomeAway(event.target.value as "home" | "away")}>
+                <option value="home">Home</option>
+                <option value="away">Away</option>
+              </select>
+            </label>
+          </div>
+          {freshError ? <div className="error-note">{freshError}</div> : null}
+          <div className="timeline-actions">
+            <button className="button-primary" disabled={freshSubmitting || !selectedSeason || !freshOpponentId} type="button" onClick={() => void createFreshLiveEntryGame()}>
+              {freshSubmitting ? "Creating game..." : "Create fresh live game"}
+            </button>
+            <span className="kicker">This uses the normal game API and sends you straight to `/live`.</span>
+          </div>
+        </section>
 
         {grouped.length === 0 ? (
           <div className="section-card pad-md stack-sm" style={{ background: "rgba(255, 255, 255, 0.72)" }}>

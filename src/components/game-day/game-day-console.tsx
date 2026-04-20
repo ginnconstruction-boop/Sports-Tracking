@@ -332,6 +332,7 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
     setSituationCorrections(corrections.items);
     setLatestSituationCorrection(latestActiveCorrection(corrections.items));
     setIsOffline(false);
+    setErrorText(null);
     setStatusText(requestActiveWriter ? "Writer lock acquired." : "Viewer session opened.");
     await persistLocalState(live.item, plays.items, opened.item);
   }
@@ -345,6 +346,7 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
     const queued = await listOutboxMutations(gameId);
     setPendingMutations(queued.length);
     if (queued.length === 0) {
+      setErrorText(null);
       return;
     }
 
@@ -487,11 +489,10 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
       setBusyAction(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to open the game session.";
-      captureClientIssue("connect_failed", error);
       if (isWriterConflict(message)) {
         try {
           await hydrateFromServer(nextDeviceKey, false);
-          setErrorText(message);
+          setErrorText(null);
           setStatusText("Viewer mode. Another writer currently holds the lease.");
           setBusyAction(null);
           return;
@@ -499,6 +500,8 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
           // Fall through to cached/offline handling below if viewer open also fails.
         }
       }
+
+      captureClientIssue("connect_failed", error);
 
       if (cachedGame) {
         const fallbackSession =
@@ -677,8 +680,15 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
       await hydrateFromServer(deviceKey, true);
       await flushOutbox(deviceKey);
     } catch (error) {
-      captureClientIssue("lease_reacquire_failed", error);
-      setErrorText(error instanceof Error ? error.message : "Unable to reacquire writer lease.");
+      const message = error instanceof Error ? error.message : "Unable to reacquire writer lease.";
+
+      if (isWriterConflict(message)) {
+        setErrorText(null);
+        setStatusText("Viewer mode. Another writer currently holds the lease.");
+      } else {
+        captureClientIssue("lease_reacquire_failed", error);
+        setErrorText(message);
+      }
     } finally {
       setBusyAction(null);
     }
