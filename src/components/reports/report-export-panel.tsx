@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { getEnabledExportFormats } from "@/lib/features/runtime";
+import type { ExportFormat } from "@/lib/domain/reports";
 
 type ExportJob = {
   id: string;
@@ -28,6 +29,48 @@ type ReportsPostResponse = {
   item: ExportJob;
 };
 
+async function readJson<T>(input: RequestInfo, init?: RequestInit) {
+  const response = await fetch(input, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {})
+    }
+  });
+  const rawBody = await response.text();
+  let body: unknown = null;
+
+  if (rawBody) {
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      if (!response.ok) {
+        throw new Error(`Request failed with status ${response.status}.`);
+      }
+
+      throw new Error("Server returned an invalid JSON response.");
+    }
+  }
+
+  if (!response.ok) {
+    const errorPayload =
+      typeof body === "object" && body !== null
+        ? (body as { error?: { message?: string } | string })
+        : null;
+
+    const message =
+      typeof errorPayload?.error === "string"
+        ? errorPayload.error
+        : typeof errorPayload?.error?.message === "string"
+          ? errorPayload.error.message
+          : `Request failed with status ${response.status}.`;
+
+    throw new Error(message);
+  }
+
+  return body as T;
+}
+
 function formatBytes(value?: number | null) {
   if (!value) return "pending";
   if (value < 1024) return `${value} B`;
@@ -35,48 +78,54 @@ function formatBytes(value?: number | null) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function exportFormatLabel(format: ExportFormat) {
+  if (format === "xlsx") {
+    return "Google Sheets";
+  }
+
+  return format.toUpperCase();
+}
+
 export function ReportExportPanel({ gameId, initialExports }: Props) {
-  const exportFormats = getEnabledExportFormats();
+  const exportFormats = getEnabledExportFormats().filter(
+    (format): format is Extract<ExportFormat, "pdf" | "xlsx"> => format === "pdf" || format === "xlsx"
+  );
   const [exports, setExports] = useState(initialExports);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   async function refreshExports() {
-    const response = await fetch(`/api/v1/games/${gameId}/reports`, {
-      method: "GET",
-      cache: "no-store"
-    });
-    const body = (await response.json()) as ReportsGetResponse | { error?: string };
-    if (!response.ok || !("exports" in body)) {
-      throw new Error(("error" in body && body.error) || "Unable to refresh exports.");
+    try {
+      const body = await readJson<ReportsGetResponse>(`/api/v1/games/${gameId}/reports`, {
+        method: "GET",
+        cache: "no-store"
+      });
+      setExports(body.exports);
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "Unable to refresh exports.");
     }
-    setExports(body.exports);
   }
 
   async function requestExport(format: (typeof exportFormats)[number]) {
     setErrorText(null);
 
-    const response = await fetch(`/api/v1/games/${gameId}/reports`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        reportType: "game_report",
-        format
-      })
-    });
-    const body = (await response.json()) as ReportsPostResponse | { error?: string };
+    try {
+      const body = await readJson<ReportsPostResponse>(`/api/v1/games/${gameId}/reports`, {
+        method: "POST",
+        body: JSON.stringify({
+          reportType: "game_report",
+          format
+        })
+      });
 
-    if (!response.ok || !("item" in body)) {
-      setErrorText(("error" in body && body.error) || "Unable to create export.");
+      startTransition(() => {
+        setExports((current) => [body.item, ...current.filter((item) => item.id !== body.item.id)]);
+      });
+      await refreshExports();
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "Unable to create export.");
       return;
     }
-
-    startTransition(() => {
-      setExports((current) => [body.item, ...current.filter((item) => item.id !== body.item.id)]);
-    });
-    await refreshExports();
   }
 
   return (
@@ -85,7 +134,7 @@ export function ReportExportPanel({ gameId, initialExports }: Props) {
         <div className="stack-sm">
           <h2 style={{ margin: 0 }}>Export pipeline</h2>
           <p className="kicker" style={{ margin: 0 }}>
-            Generate the canonical game report in the formats enabled for this launch profile, store each
+            Generate the canonical game report in PDF or Google Sheets-compatible workbook format, store each
             artifact in Supabase Storage, and keep it linked to the report job.
           </p>
         </div>
@@ -98,7 +147,7 @@ export function ReportExportPanel({ gameId, initialExports }: Props) {
               type="button"
               onClick={() => void requestExport(format)}
             >
-              {index === 0 && isPending ? "Working..." : `Export ${format.toUpperCase()}`}
+              {index === 0 && isPending ? "Working..." : `Export ${exportFormatLabel(format)}`}
             </button>
           ))}
           <button className="mini-button" disabled={isPending} type="button" onClick={() => void refreshExports()}>
@@ -109,7 +158,7 @@ export function ReportExportPanel({ gameId, initialExports }: Props) {
 
       <div className="pill-row">
         <div className="chip">Canonical game report document</div>
-        <div className="chip">{exportFormats.map((item) => item.toUpperCase()).join(" / ")}</div>
+        <div className="chip">{exportFormats.map((item) => exportFormatLabel(item)).join(" / ")}</div>
         <div className="chip">Supabase Storage artifact tracking</div>
       </div>
 
@@ -122,7 +171,7 @@ export function ReportExportPanel({ gameId, initialExports }: Props) {
           .map((job) => (
           <div className="timeline-card" key={job.id}>
             <div className="timeline-top">
-              <strong>{job.format.toUpperCase()}</strong>
+              <strong>{exportFormatLabel(job.format as ExportFormat)}</strong>
               <span className="mono">{job.status}</span>
             </div>
             <div className="timeline-meta">

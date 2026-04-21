@@ -212,7 +212,10 @@ function LiveTeamScoreCard({
   scorePulse,
   toneStyle,
   logoSrc,
-  side
+  side,
+  interactive = false,
+  onClick,
+  helperLabel
 }: {
   teamName: string;
   score: number;
@@ -220,12 +223,23 @@ function LiveTeamScoreCard({
   toneStyle: CSSProperties;
   logoSrc?: string | null;
   side: TeamSide;
+  interactive?: boolean;
+  onClick?: () => void;
+  helperLabel?: string;
 }) {
+  const Container = (interactive ? "button" : "article") as "button" | "article";
+
   return (
-    <article
-      className={scorePulse ? "live-team-score-card score-pulse-active" : "live-team-score-card"}
+    <Container
+      className={
+        scorePulse
+          ? `live-team-score-card score-pulse-active${interactive ? " live-team-score-card-interactive" : ""}`
+          : `live-team-score-card${interactive ? " live-team-score-card-interactive" : ""}`
+      }
       data-side={side}
+      onClick={onClick}
       style={toneStyle}
+      type={interactive ? "button" : undefined}
     >
       <div className="live-team-score-head">
         <TeamLogoBadge name={teamName} src={logoSrc} sideStyle={toneStyle} />
@@ -235,7 +249,8 @@ function LiveTeamScoreCard({
         </div>
       </div>
       <div className="live-team-score-value">{score}</div>
-    </article>
+      {helperLabel ? <span className="live-team-score-helper">{helperLabel}</span> : null}
+    </Container>
   );
 }
 
@@ -244,13 +259,21 @@ function LiveGameHeaderBand({
   snapshot,
   homePulse,
   awayPulse,
-  variant = "overview"
+  variant = "overview",
+  canEditSituation = false,
+  onOpenSituationEditor,
+  onEditScoringPlay,
+  canEditScore = false
 }: {
   record: GameAdminRecord;
   snapshot: GameDaySnapshot;
   homePulse: boolean;
   awayPulse: boolean;
   variant?: "overview" | "live";
+  canEditSituation?: boolean;
+  onOpenSituationEditor?: () => void;
+  onEditScoringPlay?: () => void;
+  canEditScore?: boolean;
 }) {
   const state = snapshot.currentState;
   const status = toStatusLabel(snapshot.status || record.game.status);
@@ -262,6 +285,8 @@ function LiveGameHeaderBand({
   const downDistanceLabel = formatDownDistance(state);
   const ballSpotLabel = formatOffenseRelativeSpot(state);
   const isLiveVariant = variant === "live";
+  const liveStateTag = canEditSituation ? ("button" as const) : ("div" as const);
+  const LiveStateTag = liveStateTag;
 
   return (
     <header
@@ -275,6 +300,9 @@ function LiveGameHeaderBand({
         toneStyle={homeStyle}
         logoSrc={getTeamLogoSrc(record, "home")}
         side="home"
+        interactive={isLiveVariant && canEditScore}
+        onClick={onEditScoringPlay}
+        helperLabel={isLiveVariant && canEditScore ? "Edit last score" : undefined}
       />
       <div className={isLiveVariant ? "live-game-header-center live-game-header-center-live" : "live-game-header-center"}>
         {isLiveVariant ? (
@@ -303,24 +331,40 @@ function LiveGameHeaderBand({
           </>
         )}
         <div className="live-game-situation-bar" data-testid="game-day-scoreboard-state">
-          <div className="live-game-situation-core live-game-situation-core-spot">
+          <LiveStateTag
+            className={`live-game-situation-core live-game-situation-core-spot${canEditSituation ? " live-game-situation-core-interactive" : ""}`}
+            onClick={canEditSituation ? onOpenSituationEditor : undefined}
+            type={canEditSituation ? "button" : undefined}
+          >
             <span className="live-status-label">Ball spot</span>
             <strong>{ballSpotLabel}</strong>
-          </div>
-          <div className="live-game-situation-core live-game-situation-core-down">
+          </LiveStateTag>
+          <LiveStateTag
+            className={`live-game-situation-core live-game-situation-core-down${canEditSituation ? " live-game-situation-core-interactive" : ""}`}
+            onClick={canEditSituation ? onOpenSituationEditor : undefined}
+            type={canEditSituation ? "button" : undefined}
+          >
             <span className="live-status-label">Down &amp; distance</span>
             <strong>{downDistanceLabel}</strong>
-          </div>
-          <div className="live-game-situation-core live-game-situation-core-possession">
+          </LiveStateTag>
+          <LiveStateTag
+            className={`live-game-situation-core live-game-situation-core-possession${canEditSituation ? " live-game-situation-core-interactive" : ""}`}
+            onClick={canEditSituation ? onOpenSituationEditor : undefined}
+            type={canEditSituation ? "button" : undefined}
+          >
             <span className="live-status-label">Possession</span>
             <strong>{possessionLabel}</strong>
-          </div>
+          </LiveStateTag>
         </div>
         <div className="live-game-status-ribbon">
-          <div className="live-status-core">
+          <LiveStateTag
+            className={`live-status-core${canEditSituation ? " live-game-situation-core-interactive" : ""}`}
+            onClick={canEditSituation ? onOpenSituationEditor : undefined}
+            type={canEditSituation ? "button" : undefined}
+          >
             <span className="live-status-label">Quarter</span>
             <strong>{formatQuarterLabel(state.quarter)}</strong>
-          </div>
+          </LiveStateTag>
           <div className="live-status-core">
             <span className="live-status-label">Status</span>
             <strong>{status}</strong>
@@ -334,6 +378,9 @@ function LiveGameHeaderBand({
         toneStyle={awayStyle}
         logoSrc={getTeamLogoSrc(record, "away")}
         side="away"
+        interactive={isLiveVariant && canEditScore}
+        onClick={onEditScoringPlay}
+        helperLabel={isLiveVariant && canEditScore ? "Edit last score" : undefined}
       />
     </header>
   );
@@ -343,12 +390,18 @@ function LiveEntryRecentStrip({
   plays,
   canUndoLastPlay,
   canWrite,
-  onUndoLast
+  onUndoLast,
+  onEditPlay,
+  onInsertBefore,
+  onFreshPlay
 }: {
   plays: GameDayPlayView[];
   canUndoLastPlay: boolean;
   canWrite: boolean;
   onUndoLast: () => void;
+  onEditPlay: (play: GameDayPlayView) => void;
+  onInsertBefore: (play: GameDayPlayView) => void;
+  onFreshPlay: () => void;
 }) {
   return (
     <section className="live-entry-recent-strip" data-testid="live-entry-recent-strip">
@@ -358,15 +411,23 @@ function LiveEntryRecentStrip({
           <h2 className="live-entry-strip-title">Recent sequence</h2>
         </div>
         {canWrite ? (
-          <button
-            className="mini-button live-entry-undo-button"
-            data-testid="live-entry-undo-last"
-            disabled={!canUndoLastPlay || !plays[0]}
-            type="button"
-            onClick={onUndoLast}
-          >
-            Undo last play
-          </button>
+          <div className="timeline-actions">
+            <button className="mini-button" type="button" onClick={onFreshPlay}>
+              Fresh play
+            </button>
+            <button
+              className="mini-button live-entry-undo-button"
+              data-testid="live-entry-undo-last"
+              disabled={!canUndoLastPlay || !plays[0]}
+              type="button"
+              onClick={onUndoLast}
+            >
+              Undo last play
+            </button>
+            <button className="mini-button" disabled={!plays[0]} type="button" onClick={() => plays[0] && onEditPlay(plays[0])}>
+              Edit last
+            </button>
+          </div>
         ) : (
           <span className="chip">Read only</span>
         )}
@@ -389,6 +450,16 @@ function LiveEntryRecentStrip({
                 {formatDownLabel(item.state.down)} &amp; {item.state.distance} • {formatOffenseRelativeSpot(item.state)}
               </span>
             </div>
+            {canWrite ? (
+              <div className="timeline-actions">
+                <button className="mini-button" type="button" onClick={() => onEditPlay(item)}>
+                  Edit play
+                </button>
+                <button className="mini-button" type="button" onClick={() => onInsertBefore(item)}>
+                  Insert before
+                </button>
+              </div>
+            ) : null}
           </article>
         ))}
       </div>
@@ -1117,13 +1188,19 @@ export function LiveEntryCenter({
   canUndoLastPlay,
   playEntryPanel,
   onUndoLast,
-  onReacquireWriter
+  onEditPlay,
+  onInsertBefore,
+  onFreshPlay,
+  onReacquireWriter,
+  onRecoverSituation
 }: Props) {
   const [homePulse, setHomePulse] = useState(false);
   const [awayPulse, setAwayPulse] = useState(false);
   const previousScore = useRef(snapshot.currentState.score);
   const isWriterMode = Boolean(session?.isActiveWriter);
   const leaseExpiry = formatWriterLeaseExpiry(session?.writerLeaseExpiresAt);
+  const latestPlay = snapshot.recentPlays[0] ?? null;
+  const lastScoringPlay = snapshot.lastScoringPlay ?? null;
   const actionFeedback = errorText
     ? "errors"
     : isOffline
@@ -1131,6 +1208,18 @@ export function LiveEntryCenter({
       : pendingMutations > 0 || session?.status === "syncing"
         ? "saved"
         : "synced";
+  const [recoverOpen, setRecoverOpen] = useState(false);
+  const [recoverPossession, setRecoverPossession] = useState<TeamSide>(snapshot.currentState.possession);
+  const [recoverRelativeSide, setRecoverRelativeSide] = useState<RelativeFieldSide>(relativeFieldSide(snapshot.currentState));
+  const [recoverYardLine, setRecoverYardLine] = useState(String(snapshot.currentState.ballOn.yardLine));
+  const [recoverDown, setRecoverDown] = useState(String(snapshot.currentState.down));
+  const [recoverDistance, setRecoverDistance] = useState(String(snapshot.currentState.distance));
+  const [recoverQuarter, setRecoverQuarter] = useState("");
+  const [recoverReasonCategory, setRecoverReasonCategory] =
+    useState<SituationCorrectionSubmission["reasonCategory"]>("live_resync");
+  const [recoverReasonNote, setRecoverReasonNote] = useState("");
+  const [recoverError, setRecoverError] = useState<string | null>(null);
+  const canOpenRecover = Boolean(latestPlay && isWriterMode && !isOffline && hasDeviceKey);
 
   useEffect(() => {
     const previous = previousScore.current;
@@ -1148,10 +1237,80 @@ export function LiveEntryCenter({
     previousScore.current = next;
   }, [snapshot.currentState.score]);
 
+  function openRecoverPanel() {
+    if (!latestPlay) {
+      return;
+    }
+
+    setRecoverPossession(snapshot.currentState.possession);
+    setRecoverRelativeSide(relativeFieldSide(snapshot.currentState));
+    setRecoverYardLine(String(snapshot.currentState.ballOn.yardLine));
+    setRecoverDown(String(snapshot.currentState.down));
+    setRecoverDistance(String(snapshot.currentState.distance));
+    setRecoverQuarter("");
+    setRecoverReasonCategory("live_resync");
+    setRecoverReasonNote("");
+    setRecoverError(null);
+    setRecoverOpen(true);
+  }
+
+  async function submitRecoverSituation() {
+    if (!latestPlay) {
+      return;
+    }
+
+    const yardLine = Number(recoverYardLine);
+    const down = Number(recoverDown);
+    const distance = Number(recoverDistance);
+    const quarter = recoverQuarter ? Number(recoverQuarter) : undefined;
+
+    if (!Number.isInteger(yardLine) || yardLine < 1 || yardLine > 99) {
+      setRecoverError("Ball spot must be between 1 and 99.");
+      return;
+    }
+
+    if (!Number.isInteger(down) || down < 1 || down > 4) {
+      setRecoverError("Down must be 1 through 4.");
+      return;
+    }
+
+    if (!Number.isInteger(distance) || distance < 1 || distance > 99) {
+      setRecoverError("Distance must be between 1 and 99.");
+      return;
+    }
+
+    if (recoverReasonNote.trim().length < 3) {
+      setRecoverError("Reason note is required.");
+      return;
+    }
+
+    setRecoverError(null);
+    await onRecoverSituation({
+      appliesAfterSequence: latestPlay.sequence,
+      possession: recoverPossession,
+      ballOn: {
+        side: absoluteBallSideForPossession(recoverPossession, recoverRelativeSide),
+        yardLine
+      },
+      down: down as 1 | 2 | 3 | 4,
+      distance,
+      quarter: quarter as 1 | 2 | 3 | 4 | 5 | undefined,
+      reasonCategory: recoverReasonCategory,
+      reasonNote: recoverReasonNote.trim()
+    });
+    setRecoverOpen(false);
+  }
+
   return (
     <section className="live-entry-center" style={brandingCssVariables(record.branding)}>
       <div className="live-entry-sticky-top">
         <div className="live-entry-toolbar" data-testid="live-entry-toolbar">
+          <Link className="mini-button live-entry-toolbar-link" href="/games">
+            Games
+          </Link>
+          <Link className="mini-button live-entry-toolbar-link" href={`/games/${gameId}/manage`}>
+            Game admin
+          </Link>
           <Link className="mini-button live-entry-toolbar-link" href={`/games/${gameId}/gameday`}>
             Overview
           </Link>
@@ -1216,7 +1375,118 @@ export function LiveEntryCenter({
           homePulse={homePulse}
           awayPulse={awayPulse}
           variant="live"
+          canEditSituation={canOpenRecover}
+          onOpenSituationEditor={openRecoverPanel}
+          onEditScoringPlay={lastScoringPlay ? () => onEditPlay(lastScoringPlay) : undefined}
+          canEditScore={Boolean(isWriterMode && lastScoringPlay)}
         />
+
+        {isWriterMode ? (
+          <div className="live-entry-toolbar-actions">
+            <button className="mini-button" disabled={!canOpenRecover} type="button" onClick={openRecoverPanel}>
+              Edit situation
+            </button>
+            <button
+              className="mini-button"
+              disabled={!lastScoringPlay}
+              type="button"
+              onClick={() => lastScoringPlay && onEditPlay(lastScoringPlay)}
+            >
+              Edit last score
+            </button>
+          </div>
+        ) : null}
+
+        {recoverOpen ? (
+          <section className="recover-situation-panel" data-testid="recover-situation-panel">
+            <div className="entry-header">
+              <div>
+                <span className="eyebrow live-board-eyebrow">Recover situation</span>
+                <h2 className="live-panel-heading">Edit live situation</h2>
+              </div>
+              <span className="chip">After play {latestPlay?.sequence ?? "—"}</span>
+            </div>
+            <p className="recover-situation-warning">
+              Use this only when the live situation cannot be fixed quickly by editing or adding plays.
+            </p>
+            <div className="form-grid recover-situation-grid">
+              <label className="field">
+                <span>Possession</span>
+                <select value={recoverPossession} onChange={(event) => setRecoverPossession(event.target.value as TeamSide)}>
+                  <option value="home">{snapshot.homeTeam}</option>
+                  <option value="away">{snapshot.awayTeam}</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Ball side</span>
+                <select value={recoverRelativeSide} onChange={(event) => setRecoverRelativeSide(event.target.value as RelativeFieldSide)}>
+                  <option value="own">OWN</option>
+                  <option value="opp">OPP</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Yard line</span>
+                <input inputMode="numeric" value={recoverYardLine} onChange={(event) => setRecoverYardLine(event.target.value)} />
+              </label>
+              <label className="field">
+                <span>Down</span>
+                <select value={recoverDown} onChange={(event) => setRecoverDown(event.target.value)}>
+                  <option value="1">1st</option>
+                  <option value="2">2nd</option>
+                  <option value="3">3rd</option>
+                  <option value="4">4th</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Distance</span>
+                <input inputMode="numeric" value={recoverDistance} onChange={(event) => setRecoverDistance(event.target.value)} />
+              </label>
+              <label className="field">
+                <span>Quarter (optional)</span>
+                <select value={recoverQuarter} onChange={(event) => setRecoverQuarter(event.target.value)}>
+                  <option value="">Keep current</option>
+                  <option value="1">Q1</option>
+                  <option value="2">Q2</option>
+                  <option value="3">Q3</option>
+                  <option value="4">Q4</option>
+                  <option value="5">OT</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Reason category</span>
+                <select
+                  value={recoverReasonCategory}
+                  onChange={(event) =>
+                    setRecoverReasonCategory(event.target.value as SituationCorrectionSubmission["reasonCategory"])
+                  }
+                >
+                  <option value="missed_play">Missed play</option>
+                  <option value="live_resync">Live resync</option>
+                  <option value="official_correction">Official correction</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <label className="field field-span-2">
+                <span>Reason note</span>
+                <textarea value={recoverReasonNote} onChange={(event) => setRecoverReasonNote(event.target.value)} />
+              </label>
+            </div>
+            {recoverError ? <div className="error-note">{recoverError}</div> : null}
+            <div className="timeline-actions">
+              <button className="mini-button" type="button" onClick={() => setRecoverOpen(false)}>
+                Cancel
+              </button>
+              <button
+                className="button-primary button-primary-small"
+                disabled={busyAction !== null}
+                type="button"
+                onClick={() => void submitRecoverSituation()}
+              >
+                {busyAction === "recover" ? "Correcting..." : "Apply correction"}
+              </button>
+            </div>
+          </section>
+        ) : null}
       </div>
 
       <section className="live-entry-workspace" data-mode={isWriterMode ? "writer" : "viewer"}>
@@ -1229,6 +1499,9 @@ export function LiveEntryCenter({
           canUndoLastPlay={canUndoLastPlay}
           canWrite={isWriterMode}
           onUndoLast={onUndoLast}
+          onEditPlay={onEditPlay}
+          onInsertBefore={onInsertBefore}
+          onFreshPlay={onFreshPlay}
         />
       </section>
 

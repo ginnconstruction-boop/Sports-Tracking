@@ -230,6 +230,7 @@ async function readJson<T>(input: RequestInfo, init?: RequestInit) {
 
 export function GameDayConsole({ gameId, record, initialSnapshot, surface = "overview" }: GameDayConsoleProps) {
   const canUndoLastPlay = isFeatureEnabled("undo_last_play");
+  const [recordState, setRecordState] = useState(record);
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [playLog, setPlayLog] = useState<PlayRecord[]>([]);
   const [session, setSession] = useState<GameSessionRecord | null>(null);
@@ -244,6 +245,7 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
   const [pendingMutations, setPendingMutations] = useState(0);
   const [latestSituationCorrection, setLatestSituationCorrection] = useState<GameStateCorrection | null>(null);
   const [situationCorrections, setSituationCorrections] = useState<GameStateCorrection[]>([]);
+  const [liveStatusPromoted, setLiveStatusPromoted] = useState(false);
 
   function captureClientIssue(event: string, error: unknown, context: Record<string, unknown> = {}) {
     const details =
@@ -694,6 +696,63 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
     }
   }
 
+  const ensureLiveGameInProgress = useEffectEvent(async () => {
+    if (surface !== "live" || liveStatusPromoted || !session?.isActiveWriter) {
+      return;
+    }
+
+    const currentStatus = snapshot.status || recordState.game.status;
+    if (currentStatus !== "scheduled" && currentStatus !== "ready") {
+      return;
+    }
+
+    try {
+      const updated = await readJson<{ item: { status: string } }>(`/api/v1/games/${gameId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          seasonId: recordState.season.id,
+          opponentId: recordState.opponent.id,
+          venueId: recordState.venue?.id ?? undefined,
+          kickoffAt: recordState.game.kickoffAt ?? undefined,
+          arrivalAt: recordState.game.arrivalAt ?? undefined,
+          reportAt: recordState.game.reportAt ?? undefined,
+          homeAway: recordState.game.homeAway,
+          status: "in_progress",
+          weatherConditions: recordState.game.weatherConditions ?? undefined,
+          fieldConditions: recordState.game.fieldConditions ?? undefined,
+          staffNotes: recordState.game.staffNotes ?? undefined,
+          opponentPrepNotes: recordState.game.opponentPrepNotes ?? undefined,
+          logisticsNotes: recordState.game.logisticsNotes ?? undefined,
+          publicLiveEnabled: recordState.game.publicLiveEnabled,
+          publicReportsEnabled: recordState.game.publicReportsEnabled
+        })
+      });
+
+      setRecordState((current) => ({
+        ...current,
+        game: {
+          ...current.game,
+          status: updated.item.status
+        }
+      }));
+      setSnapshot((current) => ({
+        ...current,
+        status: updated.item.status
+      }));
+      setLiveStatusPromoted(true);
+    } catch (error) {
+      captureClientIssue("auto_promote_live_status_failed", error, {
+        currentStatus
+      });
+    }
+  });
+
+  useEffect(() => {
+    if (surface === "live" && session?.isActiveWriter && !isOffline) {
+      void ensureLiveGameInProgress();
+    }
+  }, [ensureLiveGameInProgress, isOffline, session?.isActiveWriter, surface]);
+
   async function releaseWriterLease() {
     if (!deviceKey || !session?.isActiveWriter) return;
 
@@ -981,7 +1040,7 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
 
   const sharedProps = {
     gameId,
-    record,
+    record: recordState,
     snapshot,
     session,
     statusText,

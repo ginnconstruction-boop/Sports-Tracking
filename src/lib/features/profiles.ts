@@ -46,8 +46,8 @@ export const launchProfiles: Record<LaunchProfileName, FeatureProfile> = {
     resume_live_game: true,
     undo_last_play: true,
     reports_preview: true,
-    csv_export: true,
-    json_export: true,
+    csv_export: false,
+    json_export: false,
     roster_import_csv: true,
     opponent_management: true,
     team_management: true,
@@ -55,8 +55,8 @@ export const launchProfiles: Record<LaunchProfileName, FeatureProfile> = {
     offline_outbox_sync: true,
     drive_summary: false,
     advanced_participant_capture: false,
-    xlsx_export: false,
-    pdf_export: false,
+    xlsx_export: true,
+    pdf_export: true,
     live_public_tracker: false,
     parent_portal: false,
     advanced_analytics: false,
@@ -65,4 +65,3 @@ export const launchProfiles: Record<LaunchProfileName, FeatureProfile> = {
     internal_debug_tools: false
   }
 };
-
