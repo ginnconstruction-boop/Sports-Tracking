@@ -176,7 +176,7 @@ function formatWriterLeaseExpiry(value?: string | null) {
 
 function formatCorrectionSituation(correction: GameStateCorrection) {
   const relativeSide = correction.ballOn.side === correction.possession ? "OWN" : "OPP";
-  return `${correction.possession === "home" ? "Home" : "Away"} • ${relativeSide} ${correction.ballOn.yardLine} • ${formatDownLabel(correction.down)} & ${correction.distance}`;
+  return `${correction.possession === "home" ? "Home" : "Away"} | ${relativeSide} ${correction.ballOn.yardLine} | ${formatDownLabel(correction.down)} & ${correction.distance}`;
 }
 
 function TeamLogoBadge({
@@ -313,7 +313,7 @@ function LiveGameHeaderBand({
                 {record.sideLabels.away} at {record.sideLabels.home}
               </strong>
               <span>
-                {formatQuarterLabel(state.quarter)} • {status}
+                {formatQuarterLabel(state.quarter)} | {status}
               </span>
             </div>
           </div>
@@ -695,7 +695,7 @@ function LivePrimaryControlStrip({
               <span className="eyebrow live-board-eyebrow">Recover situation</span>
               <h2 className="live-panel-heading">Recover situation</h2>
             </div>
-            <span className="chip">After play {latestPlay?.sequence ?? "—"}</span>
+                <span className="chip">After play {latestPlay?.sequence ?? "-"}</span>
           </div>
           <p className="recover-situation-warning">
             Use this only when the live situation cannot be fixed quickly by editing or adding plays.
@@ -1404,7 +1404,7 @@ export function LiveEntryCenter({
                 <span className="eyebrow live-board-eyebrow">Recover situation</span>
                 <h2 className="live-panel-heading">Edit live situation</h2>
               </div>
-              <span className="chip">After play {latestPlay?.sequence ?? "—"}</span>
+              <span className="chip">After play {latestPlay?.sequence ?? "-"}</span>
             </div>
             <p className="recover-situation-warning">
               Use this only when the live situation cannot be fixed quickly by editing or adding plays.

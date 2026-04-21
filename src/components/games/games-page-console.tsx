@@ -115,8 +115,13 @@ export function GamesPageConsole() {
   const [freshSubmitting, setFreshSubmitting] = useState(false);
   const [freshError, setFreshError] = useState<string | null>(null);
 
-  useEffect(() => {
-    void (async () => {
+  async function loadGamesBoard() {
+    setStatusText("Loading games...");
+    const previousSeasonId = freshSeasonId;
+    const previousOpponentId = freshOpponentId;
+    const previousVenueId = freshVenueId;
+
+    try {
       const me = await readJson<{ memberships: Membership[] }>("/api/v1/me");
 
       const teamResponses = await Promise.all(
@@ -143,8 +148,7 @@ export function GamesPageConsole() {
       );
 
       const seasons = seasonResponses.flat();
-      setSeasonOptions(
-        seasons.map((season) => ({
+      const nextSeasonOptions = seasons.map((season) => ({
           id: season.id,
           teamId: season.teamId,
           teamName: season.teamName,
@@ -152,8 +156,8 @@ export function GamesPageConsole() {
           organizationName: season.organizationName,
           seasonLabel: season.label,
           seasonYear: season.year
-        }))
-      );
+        }));
+      setSeasonOptions(nextSeasonOptions);
 
       const uniqueOrganizationIds = Array.from(new Set(teams.map((team) => team.organizationId)));
       const [opponentResponses, venueResponses] = await Promise.all([
@@ -171,12 +175,14 @@ export function GamesPageConsole() {
         )
       ]);
 
-      setOpponentsByOrganization(
-        Object.fromEntries(opponentResponses.map((response) => [response.organizationId, response.items]))
+      const nextOpponentsByOrganization = Object.fromEntries(
+        opponentResponses.map((response) => [response.organizationId, response.items])
       );
-      setVenuesByOrganization(
-        Object.fromEntries(venueResponses.map((response) => [response.organizationId, response.items]))
+      const nextVenuesByOrganization = Object.fromEntries(
+        venueResponses.map((response) => [response.organizationId, response.items])
       );
+      setOpponentsByOrganization(nextOpponentsByOrganization);
+      setVenuesByOrganization(nextVenuesByOrganization);
       const gameResponses = await Promise.all(
         seasons.map(async (season) => {
           const rows = await readJson<{ items: GameListItem[] }>(`/api/v1/games?seasonId=${season.id}`);
@@ -201,7 +207,38 @@ export function GamesPageConsole() {
 
       setGames(nextGames);
       setStatusText(nextGames.length > 0 ? "Games ready." : "No games scheduled yet.");
-    })().catch((error) => setStatusText(error instanceof Error ? error.message : "Unable to load games."));
+      if (nextSeasonOptions.length === 0) {
+        setFreshSeasonId("");
+        setFreshOpponentId("");
+        setFreshVenueId("");
+        return;
+      }
+
+      const seasonStillExists = nextSeasonOptions.some((option) => option.id === previousSeasonId);
+      const nextSeasonId = seasonStillExists ? previousSeasonId : nextSeasonOptions[0].id;
+      setFreshSeasonId(nextSeasonId);
+
+      const selectedSeasonOption = nextSeasonOptions.find((option) => option.id === nextSeasonId) ?? nextSeasonOptions[0];
+      const nextOpponents = nextOpponentsByOrganization[selectedSeasonOption.organizationId] ?? [];
+      const nextVenues = nextVenuesByOrganization[selectedSeasonOption.organizationId] ?? [];
+
+      setFreshOpponentId(
+        nextOpponents.some((item) => item.id === previousOpponentId)
+          ? previousOpponentId
+          : (nextOpponents[0]?.id ?? "")
+      );
+      setFreshVenueId(
+        nextVenues.some((item) => item.id === previousVenueId)
+          ? previousVenueId
+          : (nextVenues[0]?.id ?? "")
+      );
+    } catch (error) {
+      setStatusText(error instanceof Error ? error.message : "Unable to load games.");
+    }
+  }
+
+  useEffect(() => {
+    void loadGamesBoard();
   }, []);
 
   useEffect(() => {
@@ -216,6 +253,28 @@ export function GamesPageConsole() {
   );
   const availableOpponents = selectedSeason ? opponentsByOrganization[selectedSeason.organizationId] ?? [] : [];
   const availableVenues = selectedSeason ? venuesByOrganization[selectedSeason.organizationId] ?? [] : [];
+
+  useEffect(() => {
+    function refreshOnReturn() {
+      void loadGamesBoard();
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        void loadGamesBoard();
+      }
+    }
+
+    window.addEventListener("focus", refreshOnReturn);
+    window.addEventListener("pageshow", refreshOnReturn);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("focus", refreshOnReturn);
+      window.removeEventListener("pageshow", refreshOnReturn);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [freshOpponentId, freshSeasonId, freshVenueId]);
 
   useEffect(() => {
     if (availableOpponents.length === 0) {
