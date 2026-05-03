@@ -526,3 +526,26 @@ export const gameStateCorrections = pgTable(
     gameCreatedIdx: index("game_state_corrections_game_created_idx").on(table.gameId, table.createdAt)
   })
 );
+
+export const gameScoreCorrections = pgTable(
+  "game_score_corrections",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    gameId: uuid("game_id")
+      .notNull()
+      .references(() => games.id, { onDelete: "cascade" }),
+    appliesAfterSequence: numeric("applies_after_sequence", { precision: 24, scale: 12 }).notNull(),
+    score: jsonb("score").notNull(),
+    reasonCategory: gameStateCorrectionReasonCategoryEnum("reason_category").notNull(),
+    reasonNote: text("reason_note").notNull(),
+    createdByUserId: uuid("created_by_user_id").references(() => appUsers.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    voidedByUserId: uuid("voided_by_user_id").references(() => appUsers.id),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidReasonNote: text("void_reason_note")
+  },
+  (table) => ({
+    gameSequenceIdx: index("game_score_corrections_game_sequence_idx").on(table.gameId, table.appliesAfterSequence),
+    gameCreatedIdx: index("game_score_corrections_game_created_idx").on(table.gameId, table.createdAt)
+  })
+);

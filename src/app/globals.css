@@ -2492,6 +2492,21 @@ h2 {
   box-shadow: none;
 }
 
+.score-correction-helper,
+.score-correction-clear-box {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(248, 243, 232, 0.08);
+}
+
+.score-correction-helper {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
 .live-entry-viewer-banner {
   display: grid;
   gap: 18px;

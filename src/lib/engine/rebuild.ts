@@ -20,6 +20,7 @@ import type {
   TeamSide
 } from "@/lib/domain/play-log";
 import type { GameStateCorrection } from "@/lib/domain/state-corrections";
+import type { ScoreCorrection } from "@/lib/domain/score-corrections";
 import type { StatProjection, StatType } from "@/lib/domain/stats";
 import { buildPlaySummary } from "@/lib/engine/summary";
 import { compareSequence, isSequenceOnOrAfter } from "@/lib/engine/sequence";
@@ -198,6 +199,20 @@ function applySituationCorrection(
     down: correction.down,
     distance: correction.distance,
     ballOn: correction.ballOn,
+    sequenceApplied: correction.appliesAfterSequence
+  };
+}
+
+function applyScoreCorrection(
+  state: DerivedGameState,
+  correction: ScoreCorrection
+): DerivedGameState {
+  return {
+    ...state,
+    score: {
+      home: correction.score.home,
+      away: correction.score.away
+    },
     sequenceApplied: correction.appliesAfterSequence
   };
 }
@@ -665,7 +680,10 @@ export function finalizePlay(previous: DerivedGameState, play: PlayRecord): Fina
 
 export function rebuildFromPlayLog(
   playLog: PlayRecord[],
-  options: PartialRebuildOptions & { corrections?: GameStateCorrection[] } = {}
+  options: PartialRebuildOptions & {
+    corrections?: GameStateCorrection[];
+    scoreCorrections?: ScoreCorrection[];
+  } = {}
 ): GameProjection {
   const ordered = [...playLog].sort((left, right) => compareSequence(left.sequence, right.sequence));
   const filtered = options.fromSequence
@@ -689,10 +707,37 @@ export function rebuildFromPlayLog(
         isSequenceOnOrAfter(correction.appliesAfterSequence, options.fromSequence!)
       )
     : orderedCorrections;
+  const orderedScoreCorrections = [...(options.scoreCorrections ?? [])].sort((left, right) => {
+    const bySequence = compareSequence(left.appliesAfterSequence, right.appliesAfterSequence);
+    if (bySequence !== 0) {
+      return bySequence;
+    }
+
+    const byCreatedAt = left.createdAt.localeCompare(right.createdAt);
+    if (byCreatedAt !== 0) {
+      return byCreatedAt;
+    }
+
+    return left.id.localeCompare(right.id);
+  });
+  const filteredScoreCorrections = options.fromSequence
+    ? orderedScoreCorrections.filter((correction) =>
+        isSequenceOnOrAfter(correction.appliesAfterSequence, options.fromSequence!)
+      )
+    : orderedScoreCorrections;
 
   const timeline = [...(options.priorTimeline ?? [])];
   let state = options.seedState ?? INITIAL_GAME_STATE;
   let correctionIndex = 0;
+  let scoreCorrectionIndex = 0;
+
+  while (
+    scoreCorrectionIndex < filteredScoreCorrections.length &&
+    compareSequence(filteredScoreCorrections[scoreCorrectionIndex]!.appliesAfterSequence, state.sequenceApplied) === 0
+  ) {
+    state = applyScoreCorrection(state, filteredScoreCorrections[scoreCorrectionIndex]!);
+    scoreCorrectionIndex += 1;
+  }
 
   for (const play of filtered) {
     const result = finalizePlay(state, play);
@@ -709,6 +754,15 @@ export function rebuildFromPlayLog(
       state = applySituationCorrection(state, filteredCorrections[correctionIndex]!);
       timeline[timeline.length - 1]!.result.finalState = state;
       correctionIndex += 1;
+    }
+
+    while (
+      scoreCorrectionIndex < filteredScoreCorrections.length &&
+      compareSequence(filteredScoreCorrections[scoreCorrectionIndex]!.appliesAfterSequence, play.sequence) === 0
+    ) {
+      state = applyScoreCorrection(state, filteredScoreCorrections[scoreCorrectionIndex]!);
+      timeline[timeline.length - 1]!.result.finalState = state;
+      scoreCorrectionIndex += 1;
     }
   }
 

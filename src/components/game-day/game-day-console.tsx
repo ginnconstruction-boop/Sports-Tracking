@@ -5,6 +5,7 @@ import type { GameAdminRecord } from "@/lib/domain/game-admin";
 import type { GameDayPlayView, GameDaySnapshot } from "@/lib/domain/game-day";
 import type { PlayRecord } from "@/lib/domain/play-log";
 import type { GameStateCorrection } from "@/lib/domain/state-corrections";
+import type { ScoreCorrection } from "@/lib/domain/score-corrections";
 import { isFeatureEnabled } from "@/lib/features/runtime";
 import { buildGameDaySnapshot } from "@/lib/game-day/snapshot";
 import { parseClockToSeconds } from "@/lib/engine/clock";
@@ -72,7 +73,20 @@ type SituationCorrectionsResponse = {
   items: GameStateCorrection[];
 };
 
+type ScoreCorrectionsResponse = {
+  items: ScoreCorrection[];
+};
+
+type ScoreCorrectionResponse = {
+  item: ScoreCorrection;
+  live: GameDaySnapshot;
+};
+
 function latestActiveCorrection(corrections: GameStateCorrection[]) {
+  return corrections.find((item) => !item.voidedAt) ?? null;
+}
+
+function latestActiveScoreCorrection(corrections: ScoreCorrection[]) {
   return corrections.find((item) => !item.voidedAt) ?? null;
 }
 
@@ -91,6 +105,21 @@ type SituationCorrectionSubmission = {
 };
 
 type VoidSituationCorrectionSubmission = {
+  correctionId: string;
+  reasonNote: string;
+};
+
+type ScoreCorrectionSubmission = {
+  appliesAfterSequence: string;
+  score: {
+    home: number;
+    away: number;
+  };
+  reasonCategory: "missed_play" | "live_resync" | "official_correction" | "other";
+  reasonNote: string;
+};
+
+type VoidScoreCorrectionSubmission = {
   correctionId: string;
   reasonNote: string;
 };
@@ -116,8 +145,19 @@ function orderedPlayLog(playLog: PlayRecord[]) {
   return [...playLog].sort((left, right) => compareSequence(left.sequence, right.sequence));
 }
 
-function buildLocalSnapshot(base: GameDaySnapshot, playLog: PlayRecord[], revision: number) {
-  const projection = rebuildFromPlayLog(orderedPlayLog(playLog));
+function buildLocalSnapshot(
+  base: GameDaySnapshot,
+  playLog: PlayRecord[],
+  revision: number,
+  options: {
+    corrections?: GameStateCorrection[];
+    scoreCorrections?: ScoreCorrection[];
+  } = {}
+) {
+  const projection = rebuildFromPlayLog(orderedPlayLog(playLog), {
+    corrections: options.corrections?.filter((item) => !item.voidedAt),
+    scoreCorrections: options.scoreCorrections?.filter((item) => !item.voidedAt)
+  });
 
   return buildGameDaySnapshot({
     gameId: base.gameId,
@@ -245,6 +285,8 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
   const [pendingMutations, setPendingMutations] = useState(0);
   const [latestSituationCorrection, setLatestSituationCorrection] = useState<GameStateCorrection | null>(null);
   const [situationCorrections, setSituationCorrections] = useState<GameStateCorrection[]>([]);
+  const [latestScoreCorrection, setLatestScoreCorrection] = useState<ScoreCorrection | null>(null);
+  const [scoreCorrections, setScoreCorrections] = useState<ScoreCorrection[]>([]);
   const [liveStatusPromoted, setLiveStatusPromoted] = useState(false);
 
   function captureClientIssue(event: string, error: unknown, context: Record<string, unknown> = {}) {
@@ -320,10 +362,13 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
       })
     });
 
-    const [live, plays, corrections] = await Promise.all([
+    const [live, plays, corrections, scoreCorrectionItems] = await Promise.all([
       readJson<LiveResponse>(`/api/v1/games/${gameId}/live`),
       readJson<PlaysResponse>(`/api/v1/games/${gameId}/plays`),
       readJson<SituationCorrectionsResponse>(`/api/v1/games/${gameId}/state-corrections`).catch(() => ({
+        items: []
+      })),
+      readJson<ScoreCorrectionsResponse>(`/api/v1/games/${gameId}/score-corrections`).catch(() => ({
         items: []
       }))
     ]);
@@ -333,6 +378,8 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
     setPlayLog(plays.items);
     setSituationCorrections(corrections.items);
     setLatestSituationCorrection(latestActiveCorrection(corrections.items));
+    setScoreCorrections(scoreCorrectionItems.items);
+    setLatestScoreCorrection(latestActiveScoreCorrection(scoreCorrectionItems.items));
     setIsOffline(false);
     setErrorText(null);
     setStatusText(requestActiveWriter ? "Writer lock acquired." : "Viewer session opened.");
@@ -388,10 +435,13 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
       }
 
       await replaceOutboxMutations(gameId, []);
-      const [live, plays, corrections] = await Promise.all([
+      const [live, plays, corrections, scoreCorrectionItems] = await Promise.all([
         readJson<LiveResponse>(`/api/v1/games/${gameId}/live`),
         readJson<PlaysResponse>(`/api/v1/games/${gameId}/plays`),
         readJson<SituationCorrectionsResponse>(`/api/v1/games/${gameId}/state-corrections`).catch(() => ({
+          items: []
+        })),
+        readJson<ScoreCorrectionsResponse>(`/api/v1/games/${gameId}/score-corrections`).catch(() => ({
           items: []
         }))
       ]);
@@ -416,6 +466,8 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
         setPlayLog(plays.items);
         setSituationCorrections(corrections.items);
         setLatestSituationCorrection(latestActiveCorrection(corrections.items));
+        setScoreCorrections(scoreCorrectionItems.items);
+        setLatestScoreCorrection(latestActiveScoreCorrection(scoreCorrectionItems.items));
         setPendingMutations(0);
         if (syncedSession) {
           setSession({
@@ -447,7 +499,10 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
       });
       const localPlayLog = basePlayLog ?? playLog;
       const localRevision = snapshot.revision + queued.length;
-      const optimisticSnapshot = buildLocalSnapshot(snapshot, localPlayLog, localRevision);
+      const optimisticSnapshot = buildLocalSnapshot(snapshot, localPlayLog, localRevision, {
+        corrections: situationCorrections,
+        scoreCorrections
+      });
       const offlineSession: GameSessionRecord = {
         id: session?.id ?? gameId,
         status: isWriterConflict(message) ? "conflict" : "local_only",
@@ -823,7 +878,10 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
             : item
         );
         const nextPlayLog = orderedPlayLog(playLog.map((item) => (item.id === submission.playId ? optimisticPlay : item)));
-        const nextSnapshot = buildLocalSnapshot(snapshot, nextPlayLog, snapshot.revision + nextMutations.length);
+        const nextSnapshot = buildLocalSnapshot(snapshot, nextPlayLog, snapshot.revision + nextMutations.length, {
+          corrections: situationCorrections,
+          scoreCorrections
+        });
         await replaceOutboxMutations(gameId, nextMutations);
         setPendingMutations(nextMutations.length);
         startTransition(() => {
@@ -866,7 +924,10 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
         submission.mode === "edit" && submission.playId
           ? orderedPlayLog(playLog.map((item) => (item.id === submission.playId ? optimisticPlay : item)))
           : orderedPlayLog([...playLog, optimisticPlay]);
-      const nextSnapshot = buildLocalSnapshot(snapshot, nextPlayLog, snapshot.revision + 1);
+      const nextSnapshot = buildLocalSnapshot(snapshot, nextPlayLog, snapshot.revision + 1, {
+        corrections: situationCorrections,
+        scoreCorrections
+      });
       await queueAndApplyMutation(mutation, nextPlayLog, nextSnapshot);
     } catch (error) {
       captureClientIssue("submit_failed", error, {
@@ -896,7 +957,10 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
             )
         );
         const nextPlayLog = playLog.filter((item) => item.id !== playId);
-        const nextSnapshot = buildLocalSnapshot(snapshot, nextPlayLog, snapshot.revision + Math.max(0, nextMutations.length));
+        const nextSnapshot = buildLocalSnapshot(snapshot, nextPlayLog, snapshot.revision + Math.max(0, nextMutations.length), {
+          corrections: situationCorrections,
+          scoreCorrections
+        });
         await replaceOutboxMutations(gameId, nextMutations);
         setPendingMutations(nextMutations.length);
         startTransition(() => {
@@ -920,7 +984,10 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
       };
 
       const nextPlayLog = playLog.filter((item) => item.id !== playId);
-      const nextSnapshot = buildLocalSnapshot(snapshot, nextPlayLog, snapshot.revision + 1);
+      const nextSnapshot = buildLocalSnapshot(snapshot, nextPlayLog, snapshot.revision + 1, {
+        corrections: situationCorrections,
+        scoreCorrections
+      });
       setStatusText("Undoing last play...");
       await queueAndApplyMutation(mutation, nextPlayLog, nextSnapshot);
     } catch (error) {
@@ -1021,6 +1088,93 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
     }
   }
 
+  async function overrideScore(correction: ScoreCorrectionSubmission) {
+    setErrorText(null);
+    setBusyAction("score-correction");
+    setStatusText("Applying score override...");
+
+    try {
+      const response = await readJson<ScoreCorrectionResponse>(`/api/v1/games/${gameId}/score-corrections`, {
+        method: "POST",
+        body: JSON.stringify(correction)
+      });
+
+      const nextSession = session
+        ? {
+            ...session,
+            localRevision: response.live.revision,
+            remoteRevision: Math.max(session.remoteRevision, response.live.revision)
+          }
+        : session;
+
+      const nextCorrections = [response.item, ...scoreCorrections.filter((item) => item.id !== response.item.id)];
+      setSnapshot(response.live);
+      setScoreCorrections(nextCorrections);
+      setLatestScoreCorrection(latestActiveScoreCorrection(nextCorrections));
+      if (nextSession) {
+        setSession(nextSession);
+      }
+      setStatusText("Score corrected.");
+      await persistLocalState(response.live, playLog, nextSession);
+    } catch (error) {
+      captureClientIssue("score_correction_failed", error, {
+        appliesAfterSequence: correction.appliesAfterSequence
+      });
+      setErrorText(error instanceof Error ? error.message : "Unable to override score.");
+      setStatusText("Score correction failed.");
+      throw error;
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function voidScoreCorrectionAction(correction: VoidScoreCorrectionSubmission) {
+    setErrorText(null);
+    setBusyAction("void-score-correction");
+    setStatusText("Clearing score override...");
+
+    try {
+      const response = await readJson<ScoreCorrectionResponse>(
+        `/api/v1/games/${gameId}/score-corrections/${correction.correctionId}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            reasonNote: correction.reasonNote
+          })
+        }
+      );
+
+      const nextCorrections = scoreCorrections.map((item) =>
+        item.id === response.item.id ? response.item : item
+      );
+      const nextSession = session
+        ? {
+            ...session,
+            localRevision: response.live.revision,
+            remoteRevision: Math.max(session.remoteRevision, response.live.revision)
+          }
+        : session;
+
+      setSnapshot(response.live);
+      setScoreCorrections(nextCorrections);
+      setLatestScoreCorrection(latestActiveScoreCorrection(nextCorrections));
+      if (nextSession) {
+        setSession(nextSession);
+      }
+      setStatusText("Score override cleared.");
+      await persistLocalState(response.live, playLog, nextSession);
+    } catch (error) {
+      captureClientIssue("void_score_correction_failed", error, {
+        correctionId: correction.correctionId
+      });
+      setErrorText(error instanceof Error ? error.message : "Unable to clear score override.");
+      setStatusText("Unable to clear score override.");
+      throw error;
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
   const latestPlay = snapshot.recentPlays[0];
   const canWrite = Boolean(session?.isActiveWriter);
     const playEntryPanel = (
@@ -1053,6 +1207,8 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
     canUndoLastPlay,
     latestSituationCorrection,
     situationCorrections,
+    latestScoreCorrection,
+    scoreCorrections,
     playEntryPanel,
     onToggleCompactMode: () => setCompactMode((current) => !current),
     onFreshPlay: () => setIntent({ kind: "append" }),
@@ -1072,7 +1228,9 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
     onReleaseWriter: () => void releaseWriterLease(),
     onReacquireWriter: () => void reacquireWriterLease(),
     onRecoverSituation: recoverSituation,
-    onVoidSituationCorrection: voidSituationCorrectionAction
+    onVoidSituationCorrection: voidSituationCorrectionAction,
+    onOverrideScore: overrideScore,
+    onVoidScoreCorrection: voidScoreCorrectionAction
   };
 
   return surface === "live" ? <LiveEntryCenter {...sharedProps} /> : <LiveGameCenter {...sharedProps} />;

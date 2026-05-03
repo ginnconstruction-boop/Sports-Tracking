@@ -8,6 +8,7 @@ import type {
   PlayType
 } from "@/lib/domain/play-log";
 import type { GameStateCorrection } from "@/lib/domain/state-corrections";
+import type { ScoreCorrection } from "@/lib/domain/score-corrections";
 import { rebuildFromPlayLog } from "@/lib/engine/rebuild";
 import { compareSequence } from "@/lib/engine/sequence";
 import { logServerError } from "@/lib/server/observability";
@@ -74,6 +75,19 @@ type GameStateCorrectionRow = {
   void_reason_note: string | null;
 };
 
+type GameScoreCorrectionRow = {
+  id: string;
+  applies_after_sequence: string | number;
+  score: { home: number; away: number } | null;
+  reason_category: GameStateCorrection["reasonCategory"];
+  reason_note: string;
+  created_by_user_id: string | null;
+  created_at: string;
+  voided_by_user_id: string | null;
+  voided_at: string | null;
+  void_reason_note: string | null;
+};
+
 function normalizeSequenceToken(sequence: string | number) {
   return typeof sequence === "string" ? sequence : String(sequence);
 }
@@ -94,6 +108,13 @@ function isMissingStateCorrectionVoidColumns(error: { message: string } | null) 
   );
 }
 
+function isMissingScoreCorrectionsTable(error: { message: string } | null) {
+  return Boolean(
+    error?.message?.includes("game_score_corrections") &&
+      (error.message.includes("schema cache") || error.message.includes("relation"))
+  );
+}
+
 export async function projectGameFromPlayLog(
   gameId: string,
   minimumRole: MembershipRole = "read_only",
@@ -104,7 +125,7 @@ export async function projectGameFromPlayLog(
   }
   const supabaseAdmin = createSupabaseAdminClient();
 
-  const [gameResult, eventsResult, correctionsResult] = await Promise.all([
+  const [gameResult, eventsResult, correctionsResult, scoreCorrectionsResult] = await Promise.all([
     supabaseAdmin
       .from("games")
       .select("id,current_revision,status,last_rebuilt_at")
@@ -125,11 +146,23 @@ export async function projectGameFromPlayLog(
       .is("voided_at", null)
       .order("applies_after_sequence", { ascending: true })
       .order("created_at", { ascending: true })
-      .returns<GameStateCorrectionRow[]>()
+      .returns<GameStateCorrectionRow[]>(),
+    supabaseAdmin
+      .from("game_score_corrections")
+      .select(
+        "id,applies_after_sequence,score,reason_category,reason_note,created_by_user_id,created_at,voided_by_user_id,voided_at,void_reason_note"
+      )
+      .eq("game_id", gameId)
+      .is("voided_at", null)
+      .order("applies_after_sequence", { ascending: true })
+      .order("created_at", { ascending: true })
+      .returns<GameScoreCorrectionRow[]>()
   ]);
 
   let correctionsError = correctionsResult.error;
   let correctionsData = correctionsResult.data ?? [];
+  let scoreCorrectionsError = scoreCorrectionsResult.error;
+  let scoreCorrectionsData = scoreCorrectionsResult.data ?? [];
 
   if (isMissingStateCorrectionVoidColumns(correctionsResult.error)) {
     const fallbackCorrectionsResult = await supabaseAdmin
@@ -170,9 +203,14 @@ export async function projectGameFromPlayLog(
     throw new Error(correctionsError.message);
   }
 
+  if (scoreCorrectionsError && !isMissingScoreCorrectionsTable(scoreCorrectionsError)) {
+    throw new Error(scoreCorrectionsError.message);
+  }
+
   const game = gameResult.data;
   const events = eventsResult.data ?? [];
   const corrections = correctionsError ? [] : correctionsData;
+  const scoreCorrections = scoreCorrectionsError ? [] : (scoreCorrectionsData as GameScoreCorrectionRow[]);
 
   if (!game) {
     throw new Error("Game not found.");
@@ -264,6 +302,22 @@ export async function projectGameFromPlayLog(
     voidedAt: correction.voided_at ?? undefined,
     voidReasonNote: correction.void_reason_note ?? undefined
   }));
+  const typedScoreCorrections: ScoreCorrection[] = scoreCorrections.map((correction) => ({
+    id: correction.id,
+    gameId,
+    appliesAfterSequence: normalizeSequenceToken(correction.applies_after_sequence),
+    score: {
+      home: Number(correction.score?.home ?? 0),
+      away: Number(correction.score?.away ?? 0)
+    },
+    reasonCategory: correction.reason_category,
+    reasonNote: correction.reason_note,
+    createdByUserId: correction.created_by_user_id ?? "",
+    createdAt: correction.created_at,
+    voidedByUserId: correction.voided_by_user_id ?? undefined,
+    voidedAt: correction.voided_at ?? undefined,
+    voidReasonNote: correction.void_reason_note ?? undefined
+  }));
 
   const projection =
     options.fromSequence && typedEvents.some((event) => compareSequence(event.sequence, options.fromSequence!) < 0)
@@ -274,18 +328,24 @@ export async function projectGameFromPlayLog(
           const prefixCorrections = typedCorrections.filter(
             (correction) => compareSequence(correction.appliesAfterSequence, options.fromSequence!) < 0
           );
+          const prefixScoreCorrections = typedScoreCorrections.filter(
+            (correction) => compareSequence(correction.appliesAfterSequence, options.fromSequence!) < 0
+          );
           const prefixProjection = rebuildFromPlayLog(prefixEvents, {
-            corrections: prefixCorrections
+            corrections: prefixCorrections,
+            scoreCorrections: prefixScoreCorrections
           });
           return rebuildFromPlayLog(typedEvents, {
             fromSequence: options.fromSequence,
             seedState: prefixProjection.currentState,
             priorTimeline: prefixProjection.timeline,
-            corrections: typedCorrections
+            corrections: typedCorrections,
+            scoreCorrections: typedScoreCorrections
           });
         })()
       : rebuildFromPlayLog(typedEvents, {
-          corrections: typedCorrections
+          corrections: typedCorrections,
+          scoreCorrections: typedScoreCorrections
         });
 
   return {

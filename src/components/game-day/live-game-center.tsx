@@ -6,6 +6,7 @@ import type { GameAdminRecord } from "@/lib/domain/game-admin";
 import type { GameDayPlayView, GameDaySnapshot } from "@/lib/domain/game-day";
 import type { DerivedGameState } from "@/lib/domain/game-state";
 import type { GameStateCorrection } from "@/lib/domain/state-corrections";
+import type { ScoreCorrection } from "@/lib/domain/score-corrections";
 import { brandingCssVariables } from "@/lib/domain/organization-settings";
 
 type GameSessionSummary = {
@@ -29,6 +30,8 @@ type Props = {
   canUndoLastPlay: boolean;
   latestSituationCorrection: GameStateCorrection | null;
   situationCorrections: GameStateCorrection[];
+  latestScoreCorrection: ScoreCorrection | null;
+  scoreCorrections: ScoreCorrection[];
   playEntryPanel: ReactNode;
   onToggleCompactMode: () => void;
   onFreshPlay: () => void;
@@ -41,6 +44,8 @@ type Props = {
   onReacquireWriter: () => void;
   onRecoverSituation: (correction: SituationCorrectionSubmission) => Promise<void>;
   onVoidSituationCorrection: (correction: VoidSituationCorrectionSubmission) => Promise<void>;
+  onOverrideScore: (correction: ScoreCorrectionSubmission) => Promise<void>;
+  onVoidScoreCorrection: (correction: VoidScoreCorrectionSubmission) => Promise<void>;
 };
 
 type TeamSide = "home" | "away";
@@ -59,6 +64,19 @@ type SituationCorrectionSubmission = {
   reasonNote: string;
 };
 type VoidSituationCorrectionSubmission = {
+  correctionId: string;
+  reasonNote: string;
+};
+type ScoreCorrectionSubmission = {
+  appliesAfterSequence: string;
+  score: {
+    home: number;
+    away: number;
+  };
+  reasonCategory: "missed_play" | "live_resync" | "official_correction" | "other";
+  reasonNote: string;
+};
+type VoidScoreCorrectionSubmission = {
   correctionId: string;
   reasonNote: string;
 };
@@ -1204,13 +1222,16 @@ export function LiveEntryCenter({
   isOffline,
   hasDeviceKey,
   canUndoLastPlay,
+  latestScoreCorrection,
   playEntryPanel,
   onUndoLast,
   onEditPlay,
   onInsertBefore,
   onFreshPlay,
   onReacquireWriter,
-  onRecoverSituation
+  onRecoverSituation,
+  onOverrideScore,
+  onVoidScoreCorrection
 }: Props) {
   const [homePulse, setHomePulse] = useState(false);
   const [awayPulse, setAwayPulse] = useState(false);
@@ -1219,6 +1240,7 @@ export function LiveEntryCenter({
   const leaseExpiry = formatWriterLeaseExpiry(session?.writerLeaseExpiresAt);
   const latestPlay = snapshot.recentPlays[0] ?? null;
   const lastScoringPlay = snapshot.lastScoringPlay ?? null;
+  const activeScoreOverride = latestScoreCorrection && !latestScoreCorrection.voidedAt ? latestScoreCorrection : null;
   const actionFeedback = errorText
     ? "errors"
     : isOffline
@@ -1237,7 +1259,16 @@ export function LiveEntryCenter({
     useState<SituationCorrectionSubmission["reasonCategory"]>("live_resync");
   const [recoverReasonNote, setRecoverReasonNote] = useState("");
   const [recoverError, setRecoverError] = useState<string | null>(null);
+  const [scoreEditorOpen, setScoreEditorOpen] = useState(false);
+  const [scoreHome, setScoreHome] = useState(String(snapshot.currentState.score.home));
+  const [scoreAway, setScoreAway] = useState(String(snapshot.currentState.score.away));
+  const [scoreReasonCategory, setScoreReasonCategory] =
+    useState<ScoreCorrectionSubmission["reasonCategory"]>("official_correction");
+  const [scoreReasonNote, setScoreReasonNote] = useState("");
+  const [scoreVoidReasonNote, setScoreVoidReasonNote] = useState("");
+  const [scoreError, setScoreError] = useState<string | null>(null);
   const canOpenRecover = Boolean(latestPlay && isWriterMode && !isOffline && hasDeviceKey);
+  const canOpenScoreEditor = Boolean(isWriterMode && !isOffline && hasDeviceKey);
 
   useEffect(() => {
     const previous = previousScore.current;
@@ -1270,6 +1301,16 @@ export function LiveEntryCenter({
     setRecoverReasonNote("");
     setRecoverError(null);
     setRecoverOpen(true);
+  }
+
+  function openScoreEditor() {
+    setScoreHome(String(snapshot.currentState.score.home));
+    setScoreAway(String(snapshot.currentState.score.away));
+    setScoreReasonCategory(activeScoreOverride ? activeScoreOverride.reasonCategory : "official_correction");
+    setScoreReasonNote("");
+    setScoreVoidReasonNote("");
+    setScoreError(null);
+    setScoreEditorOpen(true);
   }
 
   async function submitRecoverSituation() {
@@ -1317,6 +1358,56 @@ export function LiveEntryCenter({
       reasonNote: recoverReasonNote.trim()
     });
     setRecoverOpen(false);
+  }
+
+  async function submitScoreCorrection() {
+    const home = Number(scoreHome);
+    const away = Number(scoreAway);
+
+    if (!Number.isInteger(home) || home < 0 || home > 255) {
+      setScoreError("Home score must be 0 or greater.");
+      return;
+    }
+
+    if (!Number.isInteger(away) || away < 0 || away > 255) {
+      setScoreError("Away score must be 0 or greater.");
+      return;
+    }
+
+    if (scoreReasonNote.trim().length < 3) {
+      setScoreError("Reason note is required.");
+      return;
+    }
+
+    setScoreError(null);
+    await onOverrideScore({
+      appliesAfterSequence: latestPlay?.sequence ?? "0",
+      score: {
+        home,
+        away
+      },
+      reasonCategory: scoreReasonCategory,
+      reasonNote: scoreReasonNote.trim()
+    });
+    setScoreEditorOpen(false);
+  }
+
+  async function clearScoreOverride() {
+    if (!activeScoreOverride) {
+      return;
+    }
+
+    if (scoreVoidReasonNote.trim().length < 3) {
+      setScoreError("Add a short reason for clearing the override.");
+      return;
+    }
+
+    setScoreError(null);
+    await onVoidScoreCorrection({
+      correctionId: activeScoreOverride.id,
+      reasonNote: scoreVoidReasonNote.trim()
+    });
+    setScoreEditorOpen(false);
   }
 
   return (
@@ -1407,8 +1498,8 @@ export function LiveEntryCenter({
           variant="live"
           canEditSituation={canOpenRecover}
           onOpenSituationEditor={openRecoverPanel}
-          onEditScoringPlay={lastScoringPlay ? () => onEditPlay(lastScoringPlay) : undefined}
-          canEditScore={Boolean(isWriterMode && lastScoringPlay)}
+          onEditScoringPlay={canOpenScoreEditor ? openScoreEditor : undefined}
+          canEditScore={canOpenScoreEditor}
           showWriterEditHints={isWriterMode}
         />
 
@@ -1416,13 +1507,17 @@ export function LiveEntryCenter({
           <section className="live-entry-state-actions" data-testid="live-entry-state-actions">
             <button
               className="live-entry-state-action"
-              disabled={!lastScoringPlay}
+              disabled={!canOpenScoreEditor}
               type="button"
-              onClick={() => lastScoringPlay && onEditPlay(lastScoringPlay)}
+              onClick={openScoreEditor}
             >
               <span className="eyebrow live-board-eyebrow">Score</span>
-              <strong>Edit score</strong>
-              <span>{lastScoringPlay ? "Tap to adjust the latest scoring play." : "A scoring play is needed before score can be edited."}</span>
+              <strong>{activeScoreOverride ? "Score override active" : "Edit score"}</strong>
+              <span>
+                {activeScoreOverride
+                  ? `Manual override ${activeScoreOverride.score.home}-${activeScoreOverride.score.away} is active.`
+                  : "Override the live score, then correct the scoring play later if needed."}
+              </span>
             </button>
             <button
               className="live-entry-state-action"
@@ -1435,6 +1530,91 @@ export function LiveEntryCenter({
               <strong>Edit live state</strong>
               <span>Ball spot, down, distance, possession, and quarter.</span>
             </button>
+          </section>
+        ) : null}
+
+        {scoreEditorOpen ? (
+          <section className="recover-situation-panel score-correction-panel" data-testid="score-correction-panel">
+            <div className="entry-header">
+              <div>
+                <span className="eyebrow live-board-eyebrow">Score override</span>
+                <h2 className="live-panel-heading">Edit live score</h2>
+              </div>
+              <span className="chip">After play {latestPlay?.sequence ?? "0"}</span>
+            </div>
+            <p className="recover-situation-warning">
+              Use this only when the live score is wrong and you need to keep moving. You can correct the scoring play later, then clear this override.
+            </p>
+            <div className="form-grid recover-situation-grid">
+              <label className="field">
+                <span>{snapshot.homeTeam} score</span>
+                <input inputMode="numeric" value={scoreHome} onChange={(event) => setScoreHome(event.target.value)} />
+              </label>
+              <label className="field">
+                <span>{snapshot.awayTeam} score</span>
+                <input inputMode="numeric" value={scoreAway} onChange={(event) => setScoreAway(event.target.value)} />
+              </label>
+              <label className="field">
+                <span>Reason category</span>
+                <select
+                  value={scoreReasonCategory}
+                  onChange={(event) =>
+                    setScoreReasonCategory(event.target.value as ScoreCorrectionSubmission["reasonCategory"])
+                  }
+                >
+                  <option value="missed_play">Missed play</option>
+                  <option value="live_resync">Live resync</option>
+                  <option value="official_correction">Official correction</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <label className="field field-span-2">
+                <span>Reason note</span>
+                <textarea value={scoreReasonNote} onChange={(event) => setScoreReasonNote(event.target.value)} />
+              </label>
+            </div>
+            {lastScoringPlay ? (
+              <div className="score-correction-helper">
+                <span>Need to fix the underlying scoring play too?</span>
+                <button className="mini-button" type="button" onClick={() => onEditPlay(lastScoringPlay)}>
+                  Edit last scoring play
+                </button>
+              </div>
+            ) : null}
+            {activeScoreOverride ? (
+              <div className="score-correction-clear-box">
+                <div className="stack-sm">
+                  <strong>Active override: {activeScoreOverride.score.home}-{activeScoreOverride.score.away}</strong>
+                  <span className="kicker">Clear it after you correct the underlying play log.</span>
+                </div>
+                <label className="field">
+                  <span>Clear override reason</span>
+                  <input value={scoreVoidReasonNote} onChange={(event) => setScoreVoidReasonNote(event.target.value)} />
+                </label>
+                <button
+                  className="mini-button"
+                  disabled={busyAction !== null}
+                  type="button"
+                  onClick={() => void clearScoreOverride()}
+                >
+                  {busyAction === "void-score-correction" ? "Clearing..." : "Clear score override"}
+                </button>
+              </div>
+            ) : null}
+            {scoreError ? <div className="error-note">{scoreError}</div> : null}
+            <div className="timeline-actions">
+              <button className="mini-button" type="button" onClick={() => setScoreEditorOpen(false)}>
+                Cancel
+              </button>
+              <button
+                className="button-primary button-primary-small"
+                disabled={busyAction !== null}
+                type="button"
+                onClick={() => void submitScoreCorrection()}
+              >
+                {busyAction === "score-correction" ? "Saving..." : "Apply score override"}
+              </button>
+            </div>
           </section>
         ) : null}
 
