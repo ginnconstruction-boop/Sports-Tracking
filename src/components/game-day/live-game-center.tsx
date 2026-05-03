@@ -1305,15 +1305,6 @@ export function LiveEntryCenter({
     <section className="live-entry-center" style={brandingCssVariables(record.branding)}>
       <div className="live-entry-sticky-top">
         <div className="live-entry-toolbar" data-testid="live-entry-toolbar">
-          <Link className="mini-button live-entry-toolbar-link" href="/games">
-            Games
-          </Link>
-          <Link className="mini-button live-entry-toolbar-link" href={`/games/${gameId}/manage`}>
-            Game admin
-          </Link>
-          <Link className="mini-button live-entry-toolbar-link" href={`/games/${gameId}/gameday`}>
-            Overview
-          </Link>
           <div className="live-entry-toolbar-status">
             <span
               className="status-pill strong"
@@ -1327,6 +1318,27 @@ export function LiveEntryCenter({
             {isWriterMode && errorText ? <span className="status-pill">{errorText}</span> : null}
           </div>
         </div>
+
+        <section className="live-entry-exit-strip" data-testid="live-entry-exit-strip">
+          <div className="live-entry-exit-copy">
+            <span className="eyebrow live-board-eyebrow">Leave live mode</span>
+            <strong>Jump out to review, admin, reports, or the games board without losing Live Entry context.</strong>
+          </div>
+          <div className="live-entry-exit-actions">
+            <Link className="button-primary button-primary-small live-entry-exit-primary" href={`/games/${gameId}/gameday`}>
+              Back to Overview
+            </Link>
+            <Link className="mini-button live-entry-exit-button" href={`/games/${gameId}/manage`}>
+              Game admin
+            </Link>
+            <Link className="mini-button live-entry-exit-button" href={`/games/${gameId}/reports`}>
+              Reports
+            </Link>
+            <Link className="mini-button live-entry-exit-button" href="/games">
+              Games
+            </Link>
+          </div>
+        </section>
 
         {!isWriterMode ? (
           <section className="live-entry-viewer-banner" data-testid="live-entry-viewer-banner">
