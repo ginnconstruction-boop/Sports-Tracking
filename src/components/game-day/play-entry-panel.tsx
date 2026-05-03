@@ -1293,7 +1293,16 @@ export function PlayEntryPanel({
       } else if (form.passResult === "incomplete" && form.takeaway) {
         maybePush(form.takeaway, "pass_breakup", defenseSide);
       } else addTackles();
-      payload = { kind: "pass", passerNumber: form.jerseyA, targetNumber: form.jerseyB || undefined, result: form.passResult, yards: Number(form.yards), firstDown: form.firstDown || undefined, touchdown: form.touchdown || undefined };
+      payload = {
+        kind: "pass",
+        passerNumber: form.jerseyA,
+        targetNumber: form.jerseyB || undefined,
+        result: form.passResult,
+        yards: Number(form.yards),
+        returnYards: form.passResult === "interception" ? Number(form.returnYards) : undefined,
+        firstDown: form.firstDown || undefined,
+        touchdown: form.touchdown || undefined
+      };
     } else if (form.playType === "sack") {
       [form.defense, form.defenseTwo].filter(Boolean).forEach((jersey) => maybePush(jersey, "sack_credit", defenseSide));
       maybePush(form.forced, "forced_fumble", defenseSide);
@@ -1525,7 +1534,7 @@ export function PlayEntryPanel({
                 {showPassFields ? <label className="field"><span>Yards gained / lost</span><input value={form.yards} onChange={(event) => set("yards", event.target.value)} /></label> : null}
                 {showSackFields ? <label className="field"><span>Yards lost</span><input value={form.yardsLost} onChange={(event) => set("yardsLost", event.target.value)} /></label> : null}
                 {showPuntFields || showKickoffFields || form.playType === "field_goal" ? <label className="field"><span>{form.playType === "field_goal" ? "Kick distance" : "Kick / punt yards"}</span><input value={form.kickDistance} onChange={(event) => set("kickDistance", event.target.value)} /></label> : null}
-                {showPuntFields || showKickoffFields || showTurnoverFields ? <label className="field"><span>Return yards</span><input value={form.returnYards} onChange={(event) => set("returnYards", event.target.value)} /></label> : null}
+                {showPuntFields || showKickoffFields || showTurnoverFields || (showPassFields && form.passResult === "interception") ? <label className="field"><span>Return yards</span><input value={form.returnYards} onChange={(event) => set("returnYards", event.target.value)} /></label> : null}
                 {showRunFields ? <label className="field"><span>Run style</span><select value={form.runKind} onChange={(event) => set("runKind", event.target.value as FormState["runKind"])}><option value="designed">Designed</option><option value="scramble">Scramble</option><option value="quarterback_keep">QB keep</option><option value="reverse">Reverse</option></select></label> : null}
                 {showPassFields ? <label className="field"><span>Pass result</span><select value={form.passResult} onChange={(event) => set("passResult", event.target.value as FormState["passResult"])}><option value="complete">Complete</option><option value="incomplete">Incomplete</option><option value="interception">Interception</option></select></label> : null}
                 {showKickTryFields ? <label className="field"><span>Kick result</span><select value={form.kickResult} onChange={(event) => set("kickResult", event.target.value as FormState["kickResult"])}><option value="good">Good</option><option value="no_good">No good</option><option value="blocked">Blocked</option></select></label> : null}

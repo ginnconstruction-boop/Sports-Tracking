@@ -113,6 +113,9 @@ export function projectStatCreditsFromPlay(play: PlayRecord): StatCredit[] {
         credits.push({ scope: "team", side: play.possession, stat: "interception_thrown", value: 1 });
         credits.push(...playerCreditsForRole(play, "passer", "interception_thrown", 1));
         credits.push(...playerCreditsForRole(play, "interceptor", "interception", 1));
+        if (payload.returnYards) {
+          credits.push(...playerCreditsForRole(play, "returner", "return_yards", payload.returnYards));
+        }
       }
       break;
     }

@@ -245,6 +245,30 @@ function advanceField(position: FieldPosition, yards: number, offense: TeamSide)
   };
 }
 
+function fieldCoordinate(position: FieldPosition, offense: TeamSide) {
+  return position.side === offense ? position.yardLine : 100 - position.yardLine;
+}
+
+function lineToGainSpot(state: DerivedGameState) {
+  return advanceField(state.ballOn, state.distance, state.possession);
+}
+
+function hasReachedLineToGain(
+  currentSpot: FieldPosition,
+  targetSpot: FieldPosition,
+  offense: TeamSide
+) {
+  return fieldCoordinate(currentSpot, offense) >= fieldCoordinate(targetSpot, offense);
+}
+
+function distanceToLineToGain(
+  currentSpot: FieldPosition,
+  targetSpot: FieldPosition,
+  offense: TeamSide
+) {
+  return Math.max(1, fieldCoordinate(targetSpot, offense) - fieldCoordinate(currentSpot, offense));
+}
+
 function stateForPlay(previous: DerivedGameState, play: PlayRecord): DerivedGameState {
   return {
     ...previous,
@@ -320,10 +344,6 @@ function normalSeriesState(state: DerivedGameState, possession: TeamSide) {
   };
 }
 
-function distanceDeltaForPenalty(offense: TeamSide, penalty: PlayPenalty) {
-  return penalty.penalizedSide === offense ? penalty.yards : -penalty.yards;
-}
-
 function applyPhaseDistanceRules(state: DerivedGameState) {
   if (state.phase === "kickoff") {
     state.down = 1;
@@ -363,7 +383,13 @@ export function applyBasePlay(previous: DerivedGameState, play: PlayRecord): Bas
       touchdown = payload.touchdown === true;
       firstDownAchieved = payload.firstDown === true || payload.yards >= previous.distance;
 
-      if (touchdown) {
+      if (payload.fumbleLost) {
+        turnover = true;
+        metadata.possessionChanged = true;
+        next.possession = flipSide(play.possession);
+        Object.assign(next, normalSeriesState(next, next.possession));
+        metadata.nextPhase = "normal";
+      } else if (touchdown) {
         Object.assign(next, scorePoints(next, play.possession, 6));
         Object.assign(next, setTryState(next, play.possession));
         metadata.nextPhase = "try";
@@ -402,6 +428,14 @@ export function applyBasePlay(previous: DerivedGameState, play: PlayRecord): Bas
         turnover = true;
         metadata.possessionChanged = true;
         next.possession = flipSide(play.possession);
+        const interceptionSpot =
+          typeof payload.airYards === "number"
+            ? advanceField(next.ballOn, payload.airYards, play.possession)
+            : next.ballOn;
+        const returnYards = payload.returnYards ?? (payload.airYards === undefined ? payload.yards : 0);
+        next.ballOn = advanceField(interceptionSpot, returnYards, next.possession);
+        metadata.endSpot = next.ballOn;
+        metadata.postChangePossessionSpot = next.ballOn;
         Object.assign(next, normalSeriesState(next, next.possession));
         metadata.nextPhase = "normal";
       } else {
@@ -577,26 +611,13 @@ function applyAdministrativePenaltyEffects(
   play: PlayRecord
 ) {
   const offense = penaltyOffense(previous, baseResult, penalty);
-  const distanceDelta = distanceDeltaForPenalty(offense, penalty);
+  const targetSpot = previous.phase === "normal" ? lineToGainSpot(previous) : null;
 
   if (penalty.noPlay || penalty.replayDown) {
     workingState.phase = previous.phase;
     workingState.possession = previous.possession;
     workingState.down = previous.down;
     workingState.distance = previous.distance;
-  }
-
-  if (workingState.phase === "normal" && (penalty.noPlay || penalty.replayDown || play.playType === "penalty")) {
-    workingState.distance = Math.max(1, workingState.distance + distanceDelta);
-  }
-
-  if (penalty.automaticFirstDown && workingState.phase === "normal") {
-    workingState.down = 1;
-    workingState.distance = 10;
-  }
-
-  if (penalty.lossOfDown && workingState.phase === "normal") {
-    workingState.down = Math.min(4, workingState.down + 1) as 1 | 2 | 3 | 4;
   }
 
   if (penalty.timing === "post_possession" && baseResult.metadata.possessionChanged) {
@@ -607,6 +628,33 @@ function applyAdministrativePenaltyEffects(
   if (penalty.timing === "post_score") {
     workingState.phase = baseResult.nextState.phase;
     workingState.possession = baseResult.nextState.possession;
+  }
+
+  if (workingState.phase === "normal" && targetSpot) {
+    if (penalty.automaticFirstDown) {
+      workingState.down = 1;
+      workingState.distance = 10;
+    } else if (penalty.noPlay || penalty.replayDown) {
+      workingState.distance = distanceToLineToGain(workingState.ballOn, targetSpot, offense);
+    } else if (
+      penalty.timing !== "post_possession" &&
+      penalty.timing !== "post_score" &&
+      workingState.possession === previous.possession
+    ) {
+      if (hasReachedLineToGain(workingState.ballOn, targetSpot, previous.possession)) {
+        workingState.down = 1;
+        workingState.distance = 10;
+      } else if (play.playType === "penalty") {
+        workingState.distance = distanceToLineToGain(workingState.ballOn, targetSpot, previous.possession);
+      } else {
+        workingState.down = Math.min(4, previous.down + 1) as 1 | 2 | 3 | 4;
+        workingState.distance = distanceToLineToGain(workingState.ballOn, targetSpot, previous.possession);
+      }
+    }
+  }
+
+  if (penalty.lossOfDown && workingState.phase === "normal") {
+    workingState.down = Math.min(4, workingState.down + 1) as 1 | 2 | 3 | 4;
   }
 
   applyPhaseDistanceRules(workingState);

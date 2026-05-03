@@ -156,6 +156,58 @@ export const ruleEngineScenarios: RuleEngineScenario[] = [
     ]
   },
   {
+    name: "Run fumble lost changes possession at the end spot",
+    startingState: state({
+      quarter: 1,
+      clockSeconds: 622,
+      possession: "home",
+      down: 2,
+      distance: 6,
+      ballOn: position("home", 40),
+      score: { home: 0, away: 0 },
+      sequenceApplied: "103a"
+    }),
+    inputPlay: play({
+      sequence: "103b",
+      quarter: 1,
+      clockSeconds: 614,
+      possession: "home",
+      playType: "run",
+      payload: {
+        kind: "run",
+        ballCarrierNumber: "34",
+        runKind: "designed",
+        yards: 5,
+        fumble: true,
+        fumbleLost: true
+      },
+      participants: [
+        participant(playerIds.hrb34, "ball_carrier", "home"),
+        participant(playerIds.alb52, "forced_fumble", "away"),
+        participant(playerIds.adb7, "fumble_recovery", "away")
+      ]
+    }),
+    expectedFinalState: state({
+      quarter: 1,
+      clockSeconds: 614,
+      phase: "normal",
+      possession: "away",
+      down: 1,
+      distance: 10,
+      ballOn: position("home", 45),
+      score: { home: 0, away: 0 },
+      sequenceApplied: "103b"
+    }),
+    expectedStatCredits: [
+      teamCredit("home", "rushing_attempt", 1),
+      teamCredit("home", "rushing_yards", 5),
+      playerCredit("home", playerIds.hrb34, "rushing_attempt", 1),
+      playerCredit("home", playerIds.hrb34, "rushing_yards", 5),
+      playerCredit("away", playerIds.alb52, "forced_fumble", 1),
+      playerCredit("away", playerIds.adb7, "fumble_recovery", 1)
+    ]
+  },
+  {
     name: "QB scramble converts 3rd-and-4",
     startingState: state({
       quarter: 1,
@@ -352,6 +404,60 @@ export const ruleEngineScenarios: RuleEngineScenario[] = [
       playerCredit("home", playerIds.hwr5, "receiving_target", 1),
       playerCredit("home", playerIds.hwr5, "receiving_reception", 1),
       playerCredit("home", playerIds.hwr5, "receiving_yards", 12)
+    ]
+  },
+  {
+    name: "Pass interception carries return yards into the next spot",
+    startingState: state({
+      quarter: 1,
+      clockSeconds: 472,
+      possession: "home",
+      down: 2,
+      distance: 10,
+      ballOn: position("home", 35),
+      score: { home: 0, away: 0 },
+      sequenceApplied: "107a"
+    }),
+    inputPlay: play({
+      sequence: "107b",
+      quarter: 1,
+      clockSeconds: 465,
+      possession: "home",
+      playType: "pass",
+      payload: {
+        kind: "pass",
+        passerNumber: "18",
+        targetNumber: "5",
+        result: "interception",
+        yards: 0,
+        returnYards: 18
+      },
+      participants: [
+        participant(playerIds.hqb18, "passer", "home"),
+        participant(playerIds.hwr5, "target", "home"),
+        participant(playerIds.adb7, "interceptor", "away"),
+        participant(playerIds.aret2, "returner", "away")
+      ]
+    }),
+    expectedFinalState: state({
+      quarter: 1,
+      clockSeconds: 465,
+      phase: "normal",
+      possession: "away",
+      down: 1,
+      distance: 10,
+      ballOn: position("home", 17),
+      score: { home: 0, away: 0 },
+      sequenceApplied: "107b"
+    }),
+    expectedStatCredits: [
+      teamCredit("home", "passing_attempt", 1),
+      teamCredit("home", "interception_thrown", 1),
+      playerCredit("home", playerIds.hqb18, "passing_attempt", 1),
+      playerCredit("home", playerIds.hqb18, "interception_thrown", 1),
+      playerCredit("home", playerIds.hwr5, "receiving_target", 1),
+      playerCredit("away", playerIds.adb7, "interception", 1),
+      playerCredit("away", playerIds.aret2, "return_yards", 18)
     ]
   },
   {
@@ -1101,6 +1207,56 @@ export const ruleEngineScenarios: RuleEngineScenario[] = [
       ballOn: position("home", 15),
       score: { home: 20, away: 23 },
       sequenceApplied: "354"
+    }),
+    expectedStatCredits: [
+      teamCredit("home", "rushing_attempt", 1),
+      teamCredit("home", "rushing_yards", 8),
+      playerCredit("home", playerIds.hrb34, "rushing_attempt", 1),
+      playerCredit("home", playerIds.hrb34, "rushing_yards", 8)
+    ]
+  },
+  {
+    name: "Accepted offensive holding after a first-down gain restores the original line to gain",
+    startingState: state({
+      quarter: 3,
+      clockSeconds: 236,
+      possession: "home",
+      down: 3,
+      distance: 5,
+      ballOn: position("home", 20),
+      score: { home: 20, away: 23 },
+      sequenceApplied: "354a"
+    }),
+    inputPlay: play({
+      sequence: "354b",
+      quarter: 3,
+      clockSeconds: 228,
+      possession: "home",
+      playType: "run",
+      payload: { kind: "run", ballCarrierNumber: "34", runKind: "designed", yards: 8, firstDown: true },
+      participants: [participant(playerIds.hrb34, "ball_carrier", "home")],
+      penalties: [
+        penalty({
+          penalizedSide: "home",
+          code: "holding",
+          yards: 10,
+          result: "accepted",
+          enforcementType: "spot",
+          timing: "live_ball",
+          foulSpot: position("home", 24)
+        })
+      ]
+    }),
+    expectedFinalState: state({
+      quarter: 3,
+      clockSeconds: 228,
+      phase: "normal",
+      possession: "home",
+      down: 4,
+      distance: 11,
+      ballOn: position("home", 14),
+      score: { home: 20, away: 23 },
+      sequenceApplied: "354b"
     }),
     expectedStatCredits: [
       teamCredit("home", "rushing_attempt", 1),

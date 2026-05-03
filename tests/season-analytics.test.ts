@@ -122,6 +122,21 @@ test("buildSeasonAnalyticsDocument aggregates season summary, opponent history, 
               totalPlays: 60,
               totalDrives: 8
             },
+            stats: {
+              teamTotals: {
+                home: {
+                  first_down: 2,
+                  third_down_attempt: 1,
+                  third_down_conversion: 1,
+                  red_zone_trip: 2,
+                  red_zone_score: 1,
+                  rushing_yards: 104,
+                  passing_yards: 220
+                },
+                away: {}
+              },
+              playerTotals: {}
+            },
             fullTimeline,
             driveSummaries: [
               {

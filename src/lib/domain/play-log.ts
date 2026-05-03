@@ -98,6 +98,7 @@ export type PassPlayPayload = {
   result: PassResult;
   airYards?: number;
   yards: number;
+  returnYards?: number;
   yacYards?: number;
   firstDown?: boolean;
   touchdown?: boolean;
