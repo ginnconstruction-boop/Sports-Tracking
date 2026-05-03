@@ -263,7 +263,8 @@ function LiveGameHeaderBand({
   canEditSituation = false,
   onOpenSituationEditor,
   onEditScoringPlay,
-  canEditScore = false
+  canEditScore = false,
+  showWriterEditHints = false
 }: {
   record: GameAdminRecord;
   snapshot: GameDaySnapshot;
@@ -274,6 +275,7 @@ function LiveGameHeaderBand({
   onOpenSituationEditor?: () => void;
   onEditScoringPlay?: () => void;
   canEditScore?: boolean;
+  showWriterEditHints?: boolean;
 }) {
   const state = snapshot.currentState;
   const status = toStatusLabel(snapshot.status || record.game.status);
@@ -302,7 +304,13 @@ function LiveGameHeaderBand({
         side="home"
         interactive={isLiveVariant && canEditScore}
         onClick={onEditScoringPlay}
-        helperLabel={isLiveVariant && canEditScore ? "Edit last score" : undefined}
+        helperLabel={
+          isLiveVariant && showWriterEditHints
+            ? canEditScore
+              ? "Tap to edit score"
+              : "Needs scoring play"
+            : undefined
+        }
       />
       <div className={isLiveVariant ? "live-game-header-center live-game-header-center-live" : "live-game-header-center"}>
         {isLiveVariant ? (
@@ -338,6 +346,7 @@ function LiveGameHeaderBand({
           >
             <span className="live-status-label">Ball spot</span>
             <strong>{ballSpotLabel}</strong>
+            {canEditSituation ? <span className="live-state-edit-hint">Tap to edit</span> : null}
           </LiveStateTag>
           <LiveStateTag
             className={`live-game-situation-core live-game-situation-core-down${canEditSituation ? " live-game-situation-core-interactive" : ""}`}
@@ -346,6 +355,7 @@ function LiveGameHeaderBand({
           >
             <span className="live-status-label">Down &amp; distance</span>
             <strong>{downDistanceLabel}</strong>
+            {canEditSituation ? <span className="live-state-edit-hint">Tap to edit</span> : null}
           </LiveStateTag>
           <LiveStateTag
             className={`live-game-situation-core live-game-situation-core-possession${canEditSituation ? " live-game-situation-core-interactive" : ""}`}
@@ -354,6 +364,7 @@ function LiveGameHeaderBand({
           >
             <span className="live-status-label">Possession</span>
             <strong>{possessionLabel}</strong>
+            {canEditSituation ? <span className="live-state-edit-hint">Tap to edit</span> : null}
           </LiveStateTag>
         </div>
         <div className="live-game-status-ribbon">
@@ -364,6 +375,7 @@ function LiveGameHeaderBand({
           >
             <span className="live-status-label">Quarter</span>
             <strong>{formatQuarterLabel(state.quarter)}</strong>
+            {canEditSituation ? <span className="live-state-edit-hint">Tap to edit</span> : null}
           </LiveStateTag>
           <div className="live-status-core">
             <span className="live-status-label">Status</span>
@@ -380,7 +392,13 @@ function LiveGameHeaderBand({
         side="away"
         interactive={isLiveVariant && canEditScore}
         onClick={onEditScoringPlay}
-        helperLabel={isLiveVariant && canEditScore ? "Edit last score" : undefined}
+        helperLabel={
+          isLiveVariant && showWriterEditHints
+            ? canEditScore
+              ? "Tap to edit score"
+              : "Needs scoring play"
+            : undefined
+        }
       />
     </header>
   );
@@ -1391,22 +1409,33 @@ export function LiveEntryCenter({
           onOpenSituationEditor={openRecoverPanel}
           onEditScoringPlay={lastScoringPlay ? () => onEditPlay(lastScoringPlay) : undefined}
           canEditScore={Boolean(isWriterMode && lastScoringPlay)}
+          showWriterEditHints={isWriterMode}
         />
 
         {isWriterMode ? (
-          <div className="live-entry-toolbar-actions">
-            <button className="mini-button" disabled={!canOpenRecover} type="button" onClick={openRecoverPanel}>
-              Edit situation
-            </button>
+          <section className="live-entry-state-actions" data-testid="live-entry-state-actions">
             <button
-              className="mini-button"
+              className="live-entry-state-action"
               disabled={!lastScoringPlay}
               type="button"
               onClick={() => lastScoringPlay && onEditPlay(lastScoringPlay)}
             >
-              Edit last score
+              <span className="eyebrow live-board-eyebrow">Score</span>
+              <strong>Edit score</strong>
+              <span>{lastScoringPlay ? "Tap to adjust the latest scoring play." : "A scoring play is needed before score can be edited."}</span>
             </button>
-          </div>
+            <button
+              className="live-entry-state-action"
+              data-testid="live-entry-edit-situation"
+              disabled={!canOpenRecover}
+              type="button"
+              onClick={openRecoverPanel}
+            >
+              <span className="eyebrow live-board-eyebrow">Situation</span>
+              <strong>Edit live state</strong>
+              <span>Ball spot, down, distance, possession, and quarter.</span>
+            </button>
+          </section>
         ) : null}
 
         {recoverOpen ? (
