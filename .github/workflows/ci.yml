@@ -40,3 +40,42 @@ jobs:
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: test-publishable-key
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
           DIRECT_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: verify
+    if: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL != '' && secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY != '' && secrets.SUPABASE_SERVICE_ROLE_KEY != '' && secrets.SMOKE_TEST_EMAIL != '' && secrets.SMOKE_TEST_PASSWORD != '' && secrets.SMOKE_BASE_URL != '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        smoke_seed_mode: [baseline, full]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run smoke test (${{ matrix.smoke_seed_mode }})
+        run: npm run smoke:test
+        env:
+          CI: "true"
+          SMOKE_TARGET: deployed
+          SMOKE_BASE_URL: ${{ secrets.SMOKE_BASE_URL }}
+          SMOKE_SEED_MODE: ${{ matrix.smoke_seed_mode }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
+          SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}

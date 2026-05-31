@@ -168,6 +168,11 @@ export default async function ReportsPage({ params }: PageProps) {
               <h2 style={{ margin: 0 }}>Team stat view</h2>
               <span className="chip">{preview.teamStats.length} sides</span>
             </div>
+            <div className="timeline-actions">
+              <a className="mini-button" href="/docs/stat-definitions.md" rel="noreferrer" target="_blank">
+                Open stat glossary
+              </a>
+            </div>
             <div className="table-like">
               {preview.teamStats.map((team) => (
                 <div className="timeline-card" key={`team-${team.side}`}>

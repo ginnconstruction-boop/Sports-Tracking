@@ -6,6 +6,12 @@ type BrowserJsonResult<T = unknown> = {
   body: T;
 };
 
+type BrowserBinaryResult = {
+  status: number;
+  byteLength: number;
+  contentType: string | null;
+};
+
 type ApiEvidence = {
   method: string;
   url: string;
@@ -54,6 +60,19 @@ async function browserJson<T>(page: Page, url: string, init?: RequestInit): Prom
       targetInit: init
     }
   );
+}
+
+async function browserBinary(page: Page, url: string): Promise<BrowserBinaryResult> {
+  return page.evaluate(async (targetUrl) => {
+    const response = await fetch(targetUrl);
+    const body = await response.arrayBuffer();
+
+    return {
+      status: response.status,
+      byteLength: body.byteLength,
+      contentType: response.headers.get("content-type")
+    };
+  }, url);
 }
 
 async function attachDiagnostics(
@@ -168,6 +187,34 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
     let venueName = "";
     const setupMode = () => landingState === "setup";
 
+    await runStep("preflight runtime diagnostics and auth guard", async () => {
+      await page.goto("/api/health");
+
+      const health = await browserJson<{ ok: boolean; timestamp: string }>(page, "/api/health");
+      expect(health.status).toBe(200);
+      expect(health.body.ok).toBeTruthy();
+      expect(typeof health.body.timestamp).toBe("string");
+
+      const meBeforeAuth = await browserJson<{ error?: string }>(page, "/api/v1/me");
+      expect([200, 401]).toContain(meBeforeAuth.status);
+
+      const setupHealthBeforeAuth = await browserJson<{
+        error?: string;
+        runtime?: {
+          databaseHost?: string | null;
+          directUrlHost?: string | null;
+          supabaseHost?: string | null;
+          hasServiceRoleKey?: boolean;
+        };
+      }>(page, "/api/v1/setup-health");
+
+      expect([200, 401]).toContain(setupHealthBeforeAuth.status);
+      if (setupHealthBeforeAuth.body.runtime) {
+        expect(setupHealthBeforeAuth.body.runtime.supabaseHost).toBeTruthy();
+        expect(typeof setupHealthBeforeAuth.body.runtime.hasServiceRoleKey).toBe("boolean");
+      }
+    });
+
     await runStep("login", async () => {
       await page.goto("/login");
       await page.getByLabel("Email").fill(smoke.email);
@@ -176,6 +223,26 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
       await page.waitForLoadState("networkidle");
       landingState = await detectLandingState(page);
       expect(landingState).not.toBe("unknown");
+    });
+
+    await runStep("setup health resolves for authenticated smoke user", async () => {
+      const setupHealthAfterAuth = await browserJson<{
+        runtime?: {
+          supabaseHost?: string | null;
+        };
+        auth?: {
+          id: string;
+          email: string;
+        };
+        admin?: {
+          ok: boolean;
+        };
+      }>(page, "/api/v1/setup-health");
+
+      expect(setupHealthAfterAuth.status).toBe(200);
+      expect(setupHealthAfterAuth.body.runtime?.supabaseHost).toBeTruthy();
+      expect(setupHealthAfterAuth.body.auth?.email).toBe(smoke.email);
+      expect(setupHealthAfterAuth.body.admin?.ok).toBeTruthy();
     });
 
     await runStep("/api/v1/me returns 200", async () => {
@@ -659,6 +726,86 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
       await page.goto(`/games/${gameId}/reports`);
       await expect(page.getByText("Report preview")).toBeVisible();
       await expect(page.getByText("Coach packet summary")).toBeVisible();
+
+      const initialReports = await browserJson<{ preview: unknown; exports: Array<{ id: string }> }>(
+        page,
+        `/api/v1/games/${gameId}/reports`
+      );
+      expect(initialReports.status).toBe(200);
+      expect(initialReports.body.preview).toBeTruthy();
+      expect(Array.isArray(initialReports.body.exports)).toBeTruthy();
+
+      const pdfExport = await browserJson<{
+        error?: unknown;
+        item: {
+          id: string;
+          format: string;
+          status: string;
+          contentType: string | null;
+          fileSizeBytes: number | null;
+          downloadUrl: string | null;
+        };
+      }>(page, `/api/v1/games/${gameId}/reports`, {
+        method: "POST",
+        body: JSON.stringify({
+          reportType: "game_report",
+          format: "pdf"
+        })
+      });
+      if (pdfExport.status !== 201) {
+        const message = typeof pdfExport.body.error === "string" ? pdfExport.body.error : JSON.stringify(pdfExport.body);
+        expect(pdfExport.status).toBe(500);
+        expect(message).toContain("report_exports");
+        return;
+      }
+      expect(pdfExport.body.item.format).toBe("pdf");
+      expect(pdfExport.body.item.status).toBe("complete");
+      expect(pdfExport.body.item.contentType).toBe("application/pdf");
+      expect((pdfExport.body.item.fileSizeBytes ?? 0) > 0).toBeTruthy();
+      expect(pdfExport.body.item.downloadUrl).toBeTruthy();
+
+      const pdfBinary = await browserBinary(page, pdfExport.body.item.downloadUrl!);
+      expect(pdfBinary.status).toBe(200);
+      expect(pdfBinary.byteLength).toBeGreaterThan(0);
+      expect(pdfBinary.contentType).toContain("application/pdf");
+
+      const xlsxExport = await browserJson<{
+        error?: unknown;
+        item: {
+          id: string;
+          format: string;
+          status: string;
+          contentType: string | null;
+          fileSizeBytes: number | null;
+          downloadUrl: string | null;
+        };
+      }>(page, `/api/v1/games/${gameId}/reports`, {
+        method: "POST",
+        body: JSON.stringify({
+          reportType: "game_report",
+          format: "xlsx"
+        })
+      });
+      if (xlsxExport.status !== 201) {
+        const message = typeof xlsxExport.body.error === "string" ? xlsxExport.body.error : JSON.stringify(xlsxExport.body);
+        expect(xlsxExport.status).toBe(500);
+        expect(message).toContain("report_exports");
+        return;
+      }
+      expect(xlsxExport.body.item.format).toBe("xlsx");
+      expect(xlsxExport.body.item.status).toBe("complete");
+      expect(xlsxExport.body.item.contentType).toContain(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      );
+      expect((xlsxExport.body.item.fileSizeBytes ?? 0) > 0).toBeTruthy();
+      expect(xlsxExport.body.item.downloadUrl).toBeTruthy();
+
+      const xlsxBinary = await browserBinary(page, xlsxExport.body.item.downloadUrl!);
+      expect(xlsxBinary.status).toBe(200);
+      expect(xlsxBinary.byteLength).toBeGreaterThan(0);
+      expect(xlsxBinary.contentType).toContain(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      );
     });
   } catch (error) {
     await attachDiagnostics(page, testInfo, apiEvidence, consoleErrors, currentStep);

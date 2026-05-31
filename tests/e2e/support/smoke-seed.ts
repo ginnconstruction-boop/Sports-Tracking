@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { storageBuckets } from "@/lib/storage/buckets";
 import { loadSmokeEnvironment, resolveSmokeConfig, type SmokeSeedMode } from "./smoke-config";
 
 type AuthUserListResponse = Awaited<ReturnType<SupabaseClient["auth"]["admin"]["listUsers"]>>;
@@ -204,6 +205,25 @@ async function cleanupSmokeChildren(supabase: SupabaseClient, organizationId: st
   }
 }
 
+async function ensureStorageBuckets(supabase: SupabaseClient) {
+  const listed = await supabase.storage.listBuckets();
+  if (listed.error) {
+    throw listed.error;
+  }
+
+  const existing = new Set((listed.data ?? []).map((bucket) => bucket.name));
+  for (const name of [storageBuckets.exports, storageBuckets.imports, storageBuckets.teamAssets]) {
+    if (existing.has(name)) {
+      continue;
+    }
+
+    const created = await supabase.storage.createBucket(name, { public: false });
+    if (created.error && !created.error.message.toLowerCase().includes("already exists")) {
+      throw created.error;
+    }
+  }
+}
+
 async function createTeam(supabase: SupabaseClient, organizationId: string, name: string, level: string) {
   const created = await supabase
     .from("teams")
@@ -353,6 +373,8 @@ async function createGame(
 export async function seedSmokeEnvironment(mode: SmokeSeedMode): Promise<SmokeSeedResult> {
   const smoke = resolveSmokeConfig();
   const supabase = createSupabaseAdminClient();
+
+  await ensureStorageBuckets(supabase);
 
   const userId = await ensureAuthUser(supabase, smoke.email, smoke.password, smoke.displayName);
   await ensureAppUser(supabase, userId, smoke.email, smoke.displayName);
