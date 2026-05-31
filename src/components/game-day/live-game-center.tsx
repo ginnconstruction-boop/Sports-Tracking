@@ -9,6 +9,7 @@ import type { DerivedGameState } from "@/lib/domain/game-state";
 import type { GameStateCorrection } from "@/lib/domain/state-corrections";
 import type { ScoreCorrection } from "@/lib/domain/score-corrections";
 import { brandingCssVariables } from "@/lib/domain/organization-settings";
+import { isFeatureEnabled } from "@/lib/features/runtime";
 
 type GameSessionSummary = {
   status: "local_only" | "syncing" | "synced" | "conflict";
@@ -42,6 +43,10 @@ type Props = {
   onRefresh: () => void;
   onRestoreLastGoodState: () => void;
   canRestoreLastGoodState: boolean;
+  entryLockedByStatus: boolean;
+  canBypassEntryLock: boolean;
+  entryLockOverride: boolean;
+  onToggleEntryLockOverride: () => void;
   onRetrySync: () => void;
   onReleaseWriter: () => void;
   onReacquireWriter: () => void;
@@ -524,6 +529,10 @@ function LivePrimaryControlStrip({
   onRefresh,
   onRestoreLastGoodState,
   canRestoreLastGoodState,
+  entryLockedByStatus,
+  canBypassEntryLock,
+  entryLockOverride,
+  onToggleEntryLockOverride,
   onRetrySync,
   onReleaseWriter,
   onReacquireWriter,
@@ -546,6 +555,10 @@ function LivePrimaryControlStrip({
   onRefresh: () => void;
   onRestoreLastGoodState: () => void;
   canRestoreLastGoodState: boolean;
+  entryLockedByStatus: boolean;
+  canBypassEntryLock: boolean;
+  entryLockOverride: boolean;
+  onToggleEntryLockOverride: () => void;
   onRetrySync: () => void;
   onReleaseWriter: () => void;
   onReacquireWriter: () => void;
@@ -574,6 +587,9 @@ function LivePrimaryControlStrip({
     useState<SituationCorrectionSubmission["reasonCategory"]>("live_resync");
   const [recoverReasonNote, setRecoverReasonNote] = useState("");
   const [recoverError, setRecoverError] = useState<string | null>(null);
+  const [handoffOpen, setHandoffOpen] = useState(false);
+  const [handoffOperatorLabel, setHandoffOperatorLabel] = useState("");
+  const minimalMode = isFeatureEnabled("game_day_minimal_mode");
   const canOpenRecover = Boolean(latestPlay && session?.isActiveWriter && !isOffline && hasDeviceKey);
 
   function openRecoverPanel() {
@@ -704,22 +720,34 @@ function LivePrimaryControlStrip({
           Retry sync
         </button>
         {session?.isActiveWriter ? (
-          <button className="mini-button" disabled={busyAction !== null} type="button" onClick={onReleaseWriter}>
-            Release writer
-          </button>
+          <>
+            <button className="mini-button" disabled={busyAction !== null} type="button" onClick={onReleaseWriter}>
+              Release writer
+            </button>
+            <button className="mini-button" disabled={busyAction !== null} type="button" onClick={() => setHandoffOpen((current) => !current)}>
+              {handoffOpen ? "Close handoff" : "Handoff writer"}
+            </button>
+          </>
         ) : (
           <button className="mini-button" disabled={busyAction !== null || !hasDeviceKey} type="button" onClick={onReacquireWriter}>
             {busyAction === "lease" ? "Trying..." : "Try writer lease"}
           </button>
         )}
-        {isWriterMode ? (
+        {isWriterMode && !minimalMode ? (
           <button className="mini-button" type="button" onClick={onToggleCompactMode}>
             {compactMode ? "Standard entry" : "Compact entry"}
           </button>
         ) : null}
-        <button className="mini-button" type="button" onClick={onToggleTheme}>
-          {theme === "broadcast" ? "Contrast theme" : "Broadcast theme"}
-        </button>
+        {!minimalMode ? (
+          <button className="mini-button" type="button" onClick={onToggleTheme}>
+            {theme === "broadcast" ? "Contrast theme" : "Broadcast theme"}
+          </button>
+        ) : null}
+        {entryLockedByStatus && canBypassEntryLock ? (
+          <button className="mini-button" type="button" onClick={onToggleEntryLockOverride}>
+            {entryLockOverride ? "Disable lock override" : "Enable lock override"}
+          </button>
+        ) : null}
         <Link className="mini-button" href={`/games/${gameId}/manage`}>
           Game admin
         </Link>
@@ -730,6 +758,46 @@ function LivePrimaryControlStrip({
           Operator guide
         </Link>
       </div>
+      {entryLockedByStatus ? (
+        <div className="live-correction-banner">
+          <strong>Entry locked by game status</strong>
+          <span>Game status is final or archived.</span>
+          <span>
+            {canBypassEntryLock
+              ? entryLockOverride
+                ? "Lock override is active for this session."
+                : "Enable lock override only for exceptional postgame corrections."
+              : "Only game managers can bypass this lock."}
+          </span>
+        </div>
+      ) : null}
+      {handoffOpen ? (
+        <section className="recover-situation-panel">
+          <div className="entry-header">
+            <div>
+              <span className="eyebrow live-board-eyebrow">Writer handoff</span>
+              <h2 className="live-panel-heading">Transfer control to next device</h2>
+            </div>
+            <span className="chip">Single-writer safety</span>
+          </div>
+          <label className="field">
+            <span>Next operator (optional)</span>
+            <input value={handoffOperatorLabel} onChange={(event) => setHandoffOperatorLabel(event.target.value)} />
+          </label>
+          <div className="kicker">
+            Step 1: release writer here. Step 2: next device opens this game and taps Try writer lease.
+            {handoffOperatorLabel ? ` Next operator: ${handoffOperatorLabel}.` : ""}
+          </div>
+          <div className="timeline-actions">
+            <button className="mini-button" type="button" onClick={() => setHandoffOpen(false)}>
+              Cancel
+            </button>
+            <button className="button-primary button-primary-small" type="button" onClick={onReleaseWriter}>
+              Release and hand off
+            </button>
+          </div>
+        </section>
+      ) : null}
       {latestSituationCorrection ? (
         <div className="live-correction-banner" data-testid="game-day-situation-corrected-banner">
           <strong>Situation corrected</strong>
@@ -1125,6 +1193,10 @@ export function LiveGameCenter({
   onRefresh,
   onRestoreLastGoodState,
   canRestoreLastGoodState,
+  entryLockedByStatus,
+  canBypassEntryLock,
+  entryLockOverride,
+  onToggleEntryLockOverride,
   onRetrySync,
   onReleaseWriter,
   onReacquireWriter,
@@ -1169,6 +1241,7 @@ export function LiveGameCenter({
 
   const visibleRecentPlays = snapshot.recentPlays.slice(0, 3);
   const isWriterMode = Boolean(session?.isActiveWriter);
+  const minimalMode = isFeatureEnabled("game_day_minimal_mode");
 
   return (
     <section
@@ -1201,6 +1274,10 @@ export function LiveGameCenter({
         onRefresh={onRefresh}
         onRestoreLastGoodState={onRestoreLastGoodState}
         canRestoreLastGoodState={canRestoreLastGoodState}
+        entryLockedByStatus={entryLockedByStatus}
+        canBypassEntryLock={canBypassEntryLock}
+        entryLockOverride={entryLockOverride}
+        onToggleEntryLockOverride={onToggleEntryLockOverride}
         onRetrySync={onRetrySync}
         onReleaseWriter={onReleaseWriter}
         onReacquireWriter={onReacquireWriter}
@@ -1219,13 +1296,15 @@ export function LiveGameCenter({
             onUndoLast={onUndoLast}
             onFreshPlay={onFreshPlay}
           />
-          <SummaryCards snapshot={snapshot} />
-          <SituationCorrectionHistory
-            corrections={situationCorrections}
-            canVoid={Boolean(session?.isActiveWriter && !isOffline)}
-            busyAction={busyAction}
-            onVoidSituationCorrection={onVoidSituationCorrection}
-          />
+          {!minimalMode ? <SummaryCards snapshot={snapshot} /> : null}
+          {!minimalMode ? (
+            <SituationCorrectionHistory
+              corrections={situationCorrections}
+              canVoid={Boolean(session?.isActiveWriter && !isOffline)}
+              busyAction={busyAction}
+              onVoidSituationCorrection={onVoidSituationCorrection}
+            />
+          ) : null}
         </div>
       </div>
     </section>
@@ -1245,6 +1324,7 @@ export function LiveEntryCenter({
   hasDeviceKey,
   canUndoLastPlay,
   latestScoreCorrection,
+  scoreCorrections,
   playEntryPanel,
   onUndoLast,
   onEditPlay,
@@ -1253,6 +1333,10 @@ export function LiveEntryCenter({
   onReacquireWriter,
   onRestoreLastGoodState,
   canRestoreLastGoodState,
+  entryLockedByStatus,
+  canBypassEntryLock,
+  entryLockOverride,
+  onToggleEntryLockOverride,
   onRecoverSituation,
   onOverrideScore,
   onVoidScoreCorrection
@@ -1293,6 +1377,8 @@ export function LiveEntryCenter({
   const [scoreError, setScoreError] = useState<string | null>(null);
   const canOpenRecover = Boolean(latestPlay && isWriterMode && !isOffline && hasDeviceKey);
   const canOpenScoreEditor = Boolean(isWriterMode && !isOffline && hasDeviceKey);
+  const minimalMode = isFeatureEnabled("game_day_minimal_mode");
+  const activeScoreAudits = scoreCorrections.slice(0, 3);
 
   useEffect(() => {
     const previous = previousScore.current;
@@ -1538,7 +1624,35 @@ export function LiveEntryCenter({
           showWriterEditHints={isWriterMode}
         />
 
-        {isWriterMode ? (
+        <section className="live-entry-state-actions">
+          <button className="live-entry-state-action" type="button" disabled>
+            <span className="eyebrow live-board-eyebrow">Situational strip</span>
+            <strong>
+              3rd down {formatThirdDownSnapshot(snapshot, snapshot.currentState.possession)} | Red zone{" "}
+              {snapshot.currentState.ballOn.side === snapshot.currentState.possession &&
+              snapshot.currentState.ballOn.yardLine >= 80
+                ? "Yes"
+                : "No"}
+            </strong>
+            <span>
+              Possession: {formatPossessionLabel(snapshot.currentState, snapshot)} | Ball:{" "}
+              {formatOffenseRelativeSpot(snapshot.currentState)}
+            </span>
+          </button>
+          <button className="live-entry-state-action" type="button" disabled>
+            <span className="eyebrow live-board-eyebrow">Score audit</span>
+            <strong>{activeScoreAudits.length} recent score overrides tracked</strong>
+            <span>
+              {activeScoreAudits[0]
+                ? `${activeScoreAudits[0].createdByDisplayName ?? "Unknown"} | ${formatCorrectionTimestamp(
+                    activeScoreAudits[0].createdAt
+                  )} | ${activeScoreAudits[0].reasonCategory.replaceAll("_", " ")}`
+                : "No score overrides recorded this game."}
+            </span>
+          </button>
+        </section>
+
+        {isWriterMode && !minimalMode ? (
           <section className="live-entry-state-actions" data-testid="live-entry-state-actions">
             <button
               className="live-entry-state-action"
@@ -1575,6 +1689,13 @@ export function LiveEntryCenter({
               <strong>Restore last good state</strong>
               <span>Reload the most recent synced snapshot when local state drifts.</span>
             </button>
+            {entryLockedByStatus && canBypassEntryLock ? (
+              <button className="live-entry-state-action" type="button" onClick={onToggleEntryLockOverride}>
+                <span className="eyebrow live-board-eyebrow">Lock override</span>
+                <strong>{entryLockOverride ? "Override is active" : "Entry lock is active"}</strong>
+                <span>{entryLockOverride ? "Live entry lock is temporarily bypassed." : "Enable override to allow correction entry."}</span>
+              </button>
+            ) : null}
           </section>
         ) : null}
 

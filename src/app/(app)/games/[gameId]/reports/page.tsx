@@ -11,6 +11,8 @@ import { notFound } from "next/navigation";
 import { getGameDaySnapshot } from "@/server/services/game-day-service";
 import { getGameAdminRecord } from "@/server/services/game-admin-service";
 import { getGameReportPreview, getGameTendencyDatasets, listGameExports } from "@/server/services/report-service";
+import { listScoreCorrections } from "@/server/services/score-correction-service";
+import { listSituationCorrections } from "@/server/services/state-correction-service";
 
 export const dynamic = "force-dynamic";
 
@@ -161,17 +163,37 @@ function buildPostGameChecklist(
   ];
 }
 
+function reportCompleteness(preview: Awaited<ReturnType<typeof getGameReportPreview>>, exportCount: number) {
+  const checks = [
+    preview.finalSummary.totalPlays > 0,
+    preview.scoringSummary.length > 0 || (preview.finalSummary.score.home === 0 && preview.finalSummary.score.away === 0),
+    ["final", "archived"].includes(preview.context.status),
+    preview.situational.summary.totalSituationalPlays > 0,
+    exportCount > 0
+  ];
+  const passed = checks.filter(Boolean).length;
+  const score = Math.round((passed / checks.length) * 100);
+  return {
+    score,
+    passed,
+    total: checks.length,
+    label: score >= 90 ? "Coach-ready" : score >= 70 ? "Needs minor cleanup" : "Needs review"
+  };
+}
+
 export default async function ReportsPage({ params }: PageProps) {
   if (!isFeatureEnabled("reports_preview")) {
     notFound();
   }
   const { gameId } = await params;
-  const [snapshot, preview, exports, record, tendencyDatasets] = await Promise.all([
+  const [snapshot, preview, exports, record, tendencyDatasets, scoreCorrections, situationCorrections] = await Promise.all([
     getGameDaySnapshot(gameId, "read_only"),
     getGameReportPreview(gameId),
     listGameExports(gameId),
     getGameAdminRecord(gameId),
-    getGameTendencyDatasets(gameId)
+    getGameTendencyDatasets(gameId),
+    listScoreCorrections(gameId).catch(() => []),
+    listSituationCorrections(gameId).catch(() => [])
   ]);
   const showDriveSummary = isFeatureEnabled("drive_summary");
   const showAnalytics = isFeatureEnabled("advanced_analytics");
@@ -182,6 +204,31 @@ export default async function ReportsPage({ params }: PageProps) {
   const primarySide = record.game.homeAway;
   const coachInsights = topCoachInsights(preview, primarySide);
   const postGameChecklist = buildPostGameChecklist(preview, exports.length);
+  const completeness = reportCompleteness(preview, exports.length);
+  const scoreAuditItems = scoreCorrections.slice(0, 5);
+  const opponentSnapshot = tendencyDatasets.find((dataset) => dataset.key.startsWith("opponent:")) ?? null;
+  const correctionTimeline = [
+    ...scoreCorrections.map((item) => ({
+      id: `score-${item.id}`,
+      kind: "score",
+      label: `${item.score.away}-${item.score.home}`,
+      reasonCategory: item.reasonCategory,
+      reasonNote: item.reasonNote,
+      createdBy: item.createdByDisplayName ?? "Unknown",
+      createdAt: item.createdAt
+    })),
+    ...situationCorrections.map((item) => ({
+      id: `situation-${item.id}`,
+      kind: "situation",
+      label: `${item.possession === "home" ? "Home" : "Away"} | ${item.ballOn.side === item.possession ? "OWN" : "OPP"} ${item.ballOn.yardLine} | ${item.down}&${item.distance}`,
+      reasonCategory: item.reasonCategory,
+      reasonNote: item.reasonNote,
+      createdBy: item.createdByDisplayName ?? "Unknown",
+      createdAt: item.createdAt
+    }))
+  ]
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+    .slice(0, 10);
   const offenseLabel =
     record.game.homeAway === "home" ? `${preview.context.homeTeam} offense` : `${preview.context.awayTeam} offense`;
   const defenseLabel =
@@ -375,10 +422,85 @@ export default async function ReportsPage({ params }: PageProps) {
           </section>
         </section>
 
+        {opponentSnapshot ? (
+          <section className="section-card pad-lg stack-md">
+            <div className="entry-header">
+              <h2 style={{ margin: 0 }}>Next-week opponent tendency snapshot</h2>
+              <span className="chip">{opponentSnapshot.gameCount} game(s)</span>
+            </div>
+            <div className="table-like">
+              {opponentSnapshot.offense.slice(0, 3).map((line) => (
+                <div className="timeline-card" key={line.key}>
+                  <div className="timeline-top">
+                    <strong>{line.label}</strong>
+                    <span className="mono">{line.plays} plays</span>
+                  </div>
+                  <div className="pill-row">
+                    <span className="chip">Run {line.runRate}%</span>
+                    <span className="chip">Pass {line.passRate}%</span>
+                    <span className="chip">YPP {line.yardsPerPlay}</span>
+                    <span className="chip">Conv {line.conversionRate}%</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        <section className="section-card pad-lg stack-md">
+          <div className="entry-header">
+            <h2 style={{ margin: 0 }}>Score-change audit</h2>
+            <span className="chip">{scoreAuditItems.length} entries</span>
+          </div>
+          <div className="table-like">
+            {scoreAuditItems.length === 0 ? <div className="kicker">No score overrides recorded.</div> : null}
+            {scoreAuditItems.map((item) => (
+              <div className="timeline-card" key={item.id}>
+                <div className="timeline-top">
+                  <strong>
+                    {item.score.away}-{item.score.home}
+                  </strong>
+                  <span className="chip">{item.reasonCategory.replaceAll("_", " ")}</span>
+                </div>
+                <div className="kicker">
+                  {item.createdByDisplayName ?? "Unknown"} · {new Date(item.createdAt).toLocaleString()} · {item.reasonNote}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="section-card pad-lg stack-md">
+          <div className="entry-header">
+            <h2 style={{ margin: 0 }}>Corrections timeline</h2>
+            <span className="chip">{correctionTimeline.length} recent changes</span>
+          </div>
+          <div className="table-like">
+            {correctionTimeline.length === 0 ? <div className="kicker">No corrections recorded.</div> : null}
+            {correctionTimeline.map((item) => (
+              <div className="timeline-card" key={item.id}>
+                <div className="timeline-top">
+                  <strong>{item.kind === "score" ? "Score correction" : "Situation correction"}</strong>
+                  <span className="chip">{item.reasonCategory.replaceAll("_", " ")}</span>
+                </div>
+                <div className="kicker">{item.label}</div>
+                <div className="kicker">
+                  {item.createdBy} · {new Date(item.createdAt).toLocaleString()} · {item.reasonNote}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
         <section className="section-card pad-lg stack-md">
           <div className="entry-header">
             <h2 style={{ margin: 0 }}>Situational tendency board</h2>
             <span className="chip">{preview.situational.summary.totalSituationalPlays} tracked plays</span>
+          </div>
+          <div className="pill-row">
+            <span className="chip">Completeness {completeness.score}%</span>
+            <span className="chip">{completeness.passed}/{completeness.total} checks</span>
+            <span className="chip">{completeness.label}</span>
           </div>
           <div className="pill-row">
             <span className="chip">Success {formatPercent(preview.situational.summary.overallSuccessRate)}</span>

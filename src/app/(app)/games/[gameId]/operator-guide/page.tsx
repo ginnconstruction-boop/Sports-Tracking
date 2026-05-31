@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AppShell } from "@/components/chrome/app-shell";
 import { GameContextHeader } from "@/components/games/game-context-header";
+import { PrintQuickSheetButton } from "@/components/games/print-quick-sheet-button";
 import { getGameAdminRecord } from "@/server/services/game-admin-service";
 
 export const dynamic = "force-dynamic";
@@ -60,6 +61,25 @@ export default async function OperatorGuidePage({ params }: PageProps) {
             <Link className="mini-button" href={`/games/${gameId}/gameday`}>Game Day overview</Link>
             <Link className="mini-button" href={`/games/${gameId}/live`}>Live Entry</Link>
             <Link className="mini-button" href={`/games/${gameId}/reports`}>Reports</Link>
+            <PrintQuickSheetButton />
+          </div>
+        </section>
+
+        <section className="section-card pad-lg stack-md">
+          <h2 style={{ margin: 0 }}>Pilot role presets</h2>
+          <div className="table-like">
+            <div className="timeline-card">
+              <strong>Head Coach preset</strong>
+              <div className="kicker">Can manage games, review reports, and approve final lock/reopen actions.</div>
+            </div>
+            <div className="timeline-card">
+              <strong>Stat Operator preset</strong>
+              <div className="kicker">Can run live entry, corrections, and writer handoff without extra admin controls.</div>
+            </div>
+            <div className="timeline-card">
+              <strong>View Only preset</strong>
+              <div className="kicker">Can monitor game state and reports, but cannot change play log or status.</div>
+            </div>
           </div>
         </section>
       </section>

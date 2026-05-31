@@ -85,6 +85,21 @@ export const featureDefinitions = {
     category: "organization_optional",
     organizationOverridable: true
   },
+  pilot_simplicity_mode: {
+    label: "Pilot simplicity mode",
+    description: "Default to a streamlined UI for pilot schools and sideline operators.",
+    category: "production_enabled"
+  },
+  game_day_minimal_mode: {
+    label: "Game Day minimal mode",
+    description: "Keep Game Day and Live Entry focused on essential actions only.",
+    category: "production_enabled"
+  },
+  required_fields_only_entry: {
+    label: "Required fields only entry",
+    description: "Hide optional play-entry fields unless operators explicitly expand them.",
+    category: "production_enabled"
+  },
   offline_outbox_sync: {
     label: "Offline outbox sync",
     description: "Enable local-first queued sync for live game mutations.",
@@ -123,4 +138,3 @@ export const featureDefinitions = {
 } as const satisfies Record<string, FeatureDefinition>;
 
 export type FeatureKey = keyof typeof featureDefinitions;
-

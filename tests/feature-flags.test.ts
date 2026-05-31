@@ -17,6 +17,9 @@ test("production MVP launch profile only exposes the intended core feature set",
   assert.equal(production.season_management, true);
   assert.equal(production.opponent_management, true);
   assert.equal(production.offline_outbox_sync, true);
+  assert.equal(production.pilot_simplicity_mode, true);
+  assert.equal(production.game_day_minimal_mode, true);
+  assert.equal(production.required_fields_only_entry, true);
 
   assert.equal(production.drive_summary, false);
   assert.equal(production.advanced_participant_capture, false);
@@ -42,6 +45,9 @@ test("pilot core launch profile keeps optional features off by default", () => {
   assert.equal(pilot.season_management, true);
   assert.equal(pilot.opponent_management, true);
   assert.equal(pilot.offline_outbox_sync, true);
+  assert.equal(pilot.pilot_simplicity_mode, true);
+  assert.equal(pilot.game_day_minimal_mode, true);
+  assert.equal(pilot.required_fields_only_entry, true);
 
   assert.equal(pilot.csv_export, false);
   assert.equal(pilot.json_export, false);

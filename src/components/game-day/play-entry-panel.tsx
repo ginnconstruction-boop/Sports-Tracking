@@ -1071,6 +1071,7 @@ function collectSubmissionWarnings(snapshot: GameDaySnapshot, form: FormState, i
   const warnings: string[] = [];
   const state = snapshot.currentState;
   const clockSeconds = parseClockToSeconds(form.clock);
+  const latestPlay = snapshot.recentPlays[0];
 
   if (intent.kind === "append") {
     if (form.quarter !== state.quarter) {
@@ -1088,6 +1089,15 @@ function collectSubmissionWarnings(snapshot: GameDaySnapshot, form: FormState, i
     if (clockSeconds > state.clockSeconds + 2) {
       warnings.push(`Clock (${form.clock}) is ahead of live state (${formatClock(state.clockSeconds)}).`);
     }
+
+    if (
+      latestPlay &&
+      latestPlay.playType === form.playType &&
+      latestPlay.quarter === form.quarter &&
+      latestPlay.clockSeconds === clockSeconds
+    ) {
+      warnings.push("This looks like a duplicate of the previous play (same quarter, clock, and play type).");
+    }
   }
 
   if (state.phase === "kickoff" && ["run", "pass", "sack", "turnover"].includes(form.playType)) {
@@ -1096,6 +1106,10 @@ function collectSubmissionWarnings(snapshot: GameDaySnapshot, form: FormState, i
 
   if (state.phase !== "kickoff" && form.playType === "kickoff") {
     warnings.push("Selected play type is kickoff, but game state is not kickoff phase.");
+  }
+
+  if (intent.kind === "append" && clockSeconds <= 15 && form.quarter === state.quarter) {
+    warnings.push("Quarter-end checkpoint: confirm score, possession, and down/distance before the next snap.");
   }
 
   return warnings;
@@ -1126,10 +1140,12 @@ export function PlayEntryPanel({
 }: Props) {
   const isLiveSurface = surface === "live";
   const showAdvancedParticipantCapture = isFeatureEnabled("advanced_participant_capture");
+  const showRequiredOnlyEntryMode = isFeatureEnabled("required_fields_only_entry");
   const [form, setForm] = useState<FormState>(() => createForm(snapshot));
   const [focusedField, setFocusedField] = useState<FocusField>("jerseyA");
   const [formError, setFormError] = useState<string | null>(null);
   const [entryCollapsed, setEntryCollapsed] = useState(false);
+  const [showOptionalFields, setShowOptionalFields] = useState(!showRequiredOnlyEntryMode);
   const participantFields = useMemo(
     () => buildParticipantFields(form, showAdvancedParticipantCapture),
     [form, showAdvancedParticipantCapture]
@@ -1257,10 +1273,14 @@ export function PlayEntryPanel({
   }, [intent, snapshot]);
 
   useEffect(() => {
-    if (intent.kind !== "append") {
-      setEntryCollapsed(false);
-    }
+      if (intent.kind !== "append") {
+        setEntryCollapsed(false);
+      }
   }, [intent.kind]);
+
+  useEffect(() => {
+    setShowOptionalFields(!showRequiredOnlyEntryMode);
+  }, [showRequiredOnlyEntryMode, form.playType]);
 
   const sequence = intent.kind === "edit" ? intent.play.sequence : intent.kind === "insert" ? midpointSequence(intent.beforePlay.previousSequence, intent.beforePlay.sequence) : midpointSequence(snapshot.recentPlays[0]?.sequence, undefined);
   const showRunFields = form.playType === "run";
@@ -1596,6 +1616,13 @@ export function PlayEntryPanel({
                 <strong>Result and yardage</strong>
                 <span className="chip">Primary result</span>
               </div>
+              {showRequiredOnlyEntryMode ? (
+                <div className="timeline-actions">
+                  <button className="mini-button" type="button" onClick={() => setShowOptionalFields((current) => !current)}>
+                    {showOptionalFields ? "Hide optional fields" : "Show optional fields"}
+                  </button>
+                </div>
+              ) : null}
 
               <div className="form-grid play-entry-detail-grid">
                 {showRunFields ? <label className="field"><span>Yards gained / lost</span><input value={form.yards} onChange={(event) => set("yards", event.target.value)} /></label> : null}
@@ -1610,7 +1637,7 @@ export function PlayEntryPanel({
                 {showTwoPointFields ? <label className="field"><span>2-pt style</span><select value={form.twoPointStyle} onChange={(event) => set("twoPointStyle", event.target.value as FormState["twoPointStyle"])}><option value="run">Run</option><option value="pass">Pass</option></select></label> : null}
                 {showTwoPointFields ? <label className="field"><span>2-pt result</span><select value={form.twoPointResult} onChange={(event) => set("twoPointResult", event.target.value as FormState["twoPointResult"])}><option value="good">Good</option><option value="failed">Failed</option><option value="turnover">Turnover</option></select></label> : null}
                 {showTurnoverFields ? <label className="field"><span>Turnover kind</span><select value={form.turnoverKind} onChange={(event) => set("turnoverKind", event.target.value as FormState["turnoverKind"])}><option value="interception_return">Interception</option><option value="fumble_return">Fumble return</option><option value="blocked_kick_return">Blocked kick</option></select></label> : null}
-                {showRunFields || showPassFields || showTurnoverFields || showSackFields || showPenaltyOnlyFields ? (
+                {(showRunFields || showPassFields || showTurnoverFields || showSackFields || showPenaltyOnlyFields) && (!showRequiredOnlyEntryMode || showOptionalFields) ? (
                   <div className="play-entry-toggle-grid field-span-2">
                     {showRunFields || showPassFields ? <label className="checkbox-field"><input type="checkbox" checked={form.firstDown} onChange={(event) => set("firstDown", event.target.checked)} />First down</label> : null}
                     {showRunFields || showPassFields || showTurnoverFields ? <label className="checkbox-field"><input type="checkbox" checked={form.touchdown} onChange={(event) => set("touchdown", event.target.checked)} />Touchdown</label> : null}
@@ -1619,10 +1646,12 @@ export function PlayEntryPanel({
                     {showPenaltyOnlyFields ? <label className="checkbox-field"><input type="checkbox" checked={form.liveBallPenaltyOnly} onChange={(event) => set("liveBallPenaltyOnly", event.target.checked)} />Live-ball penalty play</label> : null}
                   </div>
                 ) : null}
+                {(!showRequiredOnlyEntryMode || showOptionalFields) ? (
                 <label className="field field-span-2">
                   <span>Summary override</span>
                   <input value={form.summary} onChange={(event) => set("summary", event.target.value)} />
                 </label>
+                ) : null}
               </div>
             </section>
           </div>

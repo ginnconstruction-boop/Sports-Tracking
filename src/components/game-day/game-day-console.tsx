@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useEffectEvent, useState, useTransition } from "react";
+import { hasCapability } from "@/lib/auth/roles";
 import type { GameAdminRecord } from "@/lib/domain/game-admin";
 import type { GameDayPlayView, GameDaySnapshot } from "@/lib/domain/game-day";
 import type { PlayRecord } from "@/lib/domain/play-log";
@@ -290,6 +291,7 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
   const [liveStatusPromoted, setLiveStatusPromoted] = useState(false);
   const [lastGoodSnapshot, setLastGoodSnapshot] = useState<GameDaySnapshot | null>(initialSnapshot);
   const [lastGoodPlayLog, setLastGoodPlayLog] = useState<PlayRecord[]>([]);
+  const [entryLockOverride, setEntryLockOverride] = useState(false);
 
   function captureClientIssue(event: string, error: unknown, context: Record<string, unknown> = {}) {
     const details =
@@ -816,6 +818,13 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
     }
   }, [ensureLiveGameInProgress, isOffline, session?.isActiveWriter, surface]);
 
+  useEffect(() => {
+    const status = snapshot.status || recordState.game.status;
+    if (status !== "final" && status !== "archived" && entryLockOverride) {
+      setEntryLockOverride(false);
+    }
+  }, [entryLockOverride, recordState.game.status, snapshot.status]);
+
   async function releaseWriterLease() {
     if (!deviceKey || !session?.isActiveWriter) return;
 
@@ -1237,11 +1246,16 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
 
   const latestPlay = snapshot.recentPlays[0];
   const canWrite = Boolean(session?.isActiveWriter);
-    const playEntryPanel = (
+  const gameStatus = snapshot.status || recordState.game.status;
+  const entryLockedByStatus = gameStatus === "final" || gameStatus === "archived";
+  const canBypassEntryLock = hasCapability(recordState.currentUserRole, "manage_games");
+  const entrySubmissionLocked = entryLockedByStatus && (!canBypassEntryLock || !entryLockOverride);
+  const canMutatePlays = canWrite && !entrySubmissionLocked;
+  const playEntryPanel = (
       <PlayEntryPanel
         snapshot={snapshot}
         intent={intent}
-        disabled={!canWrite}
+        disabled={!canWrite || entrySubmissionLocked}
         viewerMode={!canWrite}
         submitting={isPending}
         compactMode={compactMode}
@@ -1264,7 +1278,7 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
     isOffline,
     compactMode,
     hasDeviceKey: Boolean(deviceKey),
-    canUndoLastPlay,
+    canUndoLastPlay: canUndoLastPlay && canMutatePlays,
     latestSituationCorrection,
     situationCorrections,
     latestScoreCorrection,
@@ -1273,15 +1287,25 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
     onToggleCompactMode: () => setCompactMode((current) => !current),
     onFreshPlay: () => setIntent({ kind: "append" }),
     onUndoLast: () => {
-      if (latestPlay) {
+      if (latestPlay && canMutatePlays) {
         void deletePlay(latestPlay.playId);
       }
     },
-    onEditPlay: (play: GameDayPlayView) => setIntent({ kind: "edit", play }),
-    onInsertBefore: (play: GameDayPlayView) => setIntent({ kind: "insert", beforePlay: play }),
+    onEditPlay: (play: GameDayPlayView) => {
+      if (!canMutatePlays) return;
+      setIntent({ kind: "edit", play });
+    },
+    onInsertBefore: (play: GameDayPlayView) => {
+      if (!canMutatePlays) return;
+      setIntent({ kind: "insert", beforePlay: play });
+    },
     onRefresh: () => void refreshLiveSnapshot(),
     onRestoreLastGoodState: () => void restoreLastGoodState(),
     canRestoreLastGoodState: Boolean(lastGoodSnapshot || lastGoodPlayLog.length > 0),
+    entryLockedByStatus,
+    canBypassEntryLock,
+    entryLockOverride,
+    onToggleEntryLockOverride: () => setEntryLockOverride((current) => !current),
     onRetrySync: () => {
       if (deviceKey) {
         void flushOutbox(deviceKey);

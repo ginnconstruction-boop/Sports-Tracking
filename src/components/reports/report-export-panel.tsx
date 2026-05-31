@@ -87,6 +87,21 @@ function exportFormatLabel(format: ExportFormat) {
   return format.toUpperCase();
 }
 
+function exportFailureSuggestion(message?: string | null) {
+  if (!message) return null;
+  const normalized = message.toLowerCase();
+  if (normalized.includes("report_exports")) {
+    return "Database migration missing. Apply latest migrations and rerun export.";
+  }
+  if (normalized.includes("storage") || normalized.includes("bucket")) {
+    return "Storage setup issue. Verify the exports bucket exists and service key permissions are valid.";
+  }
+  if (normalized.includes("disabled in the active launch profile")) {
+    return "This export format is disabled in the current launch profile.";
+  }
+  return "Retry the export. If it fails again, capture this message and run setup health diagnostics.";
+}
+
 export function ReportExportPanel({ gameId, initialExports, canRequestExports = true }: Props) {
   const exportFormats = getEnabledExportFormats().filter(
     (format): format is Extract<ExportFormat, "pdf" | "xlsx"> => format === "pdf" || format === "xlsx"
@@ -140,6 +155,14 @@ export function ReportExportPanel({ gameId, initialExports, canRequestExports = 
           </p>
         </div>
         <div className="pill-row">
+          <button
+            className="button-secondary button-secondary-light"
+            disabled={isPending || !canRequestExports || !exportFormats.includes("pdf")}
+            type="button"
+            onClick={() => void requestExport("pdf")}
+          >
+            Coach-ready PDF
+          </button>
           {exportFormats.map((format, index) => (
             <button
               className={index === 0 ? "button-primary button-primary-small" : "button-secondary button-secondary-light"}
@@ -183,6 +206,7 @@ export function ReportExportPanel({ gameId, initialExports, canRequestExports = 
               <span className="mono">{formatBytes(job.fileSizeBytes)}</span>
             </div>
             {job.errorMessage ? <div className="error-note">{job.errorMessage}</div> : null}
+            {job.errorMessage ? <div className="kicker">{exportFailureSuggestion(job.errorMessage)}</div> : null}
             <div className="timeline-actions">
               {job.downloadUrl ? (
                 <a className="utility-link" href={job.downloadUrl} rel="noreferrer" target="_blank">

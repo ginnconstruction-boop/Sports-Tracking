@@ -24,16 +24,17 @@ type AppShellProps = {
 };
 
 export function AppShell({ title, subtitle, children, current, gameId, navMode = "default" }: AppShellProps) {
-  const showAnalytics = isFeatureEnabled("advanced_analytics");
-  const showAdmin = isFeatureEnabled("internal_debug_tools");
+  const pilotSimplicityMode = isFeatureEnabled("pilot_simplicity_mode");
+  const showAnalytics = !pilotSimplicityMode && isFeatureEnabled("advanced_analytics");
+  const showAdmin = !pilotSimplicityMode && isFeatureEnabled("internal_debug_tools");
   const showGameDay = isFeatureEnabled("game_day_mode");
   const showReports = isFeatureEnabled("reports_preview");
-  const showReview = isFeatureEnabled("internal_debug_tools");
+  const showReview = !pilotSimplicityMode && isFeatureEnabled("internal_debug_tools");
   const defaultNav = [
     { href: "/", label: "Operations", key: "home" },
     { href: "/games", label: "Games", key: "games" },
-    { href: "/onboarding", label: "Onboarding", key: "onboarding" },
-    { href: "/setup", label: "Setup", key: "setup" },
+    ...(pilotSimplicityMode ? [] : [{ href: "/onboarding", label: "Onboarding", key: "onboarding" as const }]),
+    ...(pilotSimplicityMode ? [] : [{ href: "/setup", label: "Setup", key: "setup" as const }]),
     ...(showAnalytics ? [{ href: "/analytics", label: "Analytics", key: "analytics" as const }] : []),
     ...(showAdmin ? [{ href: "/admin", label: "Admin", key: "admin" as const }] : []),
     ...(gameId ? [{ href: `/games/${gameId}/manage`, label: "Game Admin", key: "manage" as const }] : []),

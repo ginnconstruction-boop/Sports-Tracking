@@ -96,6 +96,8 @@ export function GameAdminConsole({ record, opponents, venues }: Props) {
   const [archiveUndoTargetStatus, setArchiveUndoTargetStatus] = useState<FormState["status"] | null>(null);
   const [archiveUndoExpiresAt, setArchiveUndoExpiresAt] = useState<number | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [showReopenPanel, setShowReopenPanel] = useState(false);
+  const [reopenReason, setReopenReason] = useState("");
   const canManageGames = hasCapability(adminRecord.currentUserRole, "manage_games");
   const canWriteLivePlays = hasCapability(adminRecord.currentUserRole, "write_live_plays");
   const [form, setForm] = useState<FormState>({
@@ -328,6 +330,72 @@ export function GameAdminConsole({ record, opponents, venues }: Props) {
     setArchiveUndoExpiresAt(null);
   }
 
+  async function finalizeAndLock() {
+    await saveGameWithStatus("final");
+  }
+
+  async function reopenFinalGame() {
+    if (!canManageGames) {
+      setStatusText("Only game managers can reopen final or archived games.");
+      return;
+    }
+
+    if (reopenReason.trim().length < 5) {
+      setStatusText("Reopen reason is required (at least 5 characters).");
+      return;
+    }
+
+    setIsBusy(true);
+    setStatusText("Reopening game...");
+
+    const reopenNote = `[Reopened ${new Date().toLocaleString()}] ${reopenReason.trim()}`;
+    const mergedStaffNotes = [form.staffNotes.trim(), reopenNote].filter(Boolean).join("\n");
+
+    try {
+      const response = await readJson<{ item: GameAdminRecord["game"] }>(`/api/v1/games/${adminRecord.game.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          seasonId: adminRecord.season.id,
+          opponentId: form.opponentId,
+          venueId: form.venueId || undefined,
+          kickoffAt: form.kickoffAt ? new Date(form.kickoffAt).toISOString() : undefined,
+          arrivalAt: form.arrivalAt ? new Date(form.arrivalAt).toISOString() : undefined,
+          reportAt: form.reportAt ? new Date(form.reportAt).toISOString() : undefined,
+          homeAway: form.homeAway,
+          status: "ready",
+          weatherConditions: form.weatherConditions || undefined,
+          fieldConditions: form.fieldConditions || undefined,
+          staffNotes: mergedStaffNotes || undefined,
+          opponentPrepNotes: form.opponentPrepNotes || undefined,
+          logisticsNotes: form.logisticsNotes || undefined,
+          publicLiveEnabled: form.publicLiveEnabled,
+          publicReportsEnabled: form.publicReportsEnabled
+        })
+      });
+
+      setAdminRecord((current) => ({
+        ...current,
+        game: {
+          ...current.game,
+          status: response.item.status,
+          staffNotes: mergedStaffNotes || null
+        }
+      }));
+      setForm((current) => ({
+        ...current,
+        status: "ready",
+        staffNotes: mergedStaffNotes
+      }));
+      setReopenReason("");
+      setShowReopenPanel(false);
+      setStatusText("Game reopened and set to ready.");
+    } catch (error) {
+      setStatusText(messageFromError(error, "Unable to reopen game."));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   return (
     <section className="section-grid">
       <section className="section-card pad-lg stack-md">
@@ -493,6 +561,14 @@ export function GameAdminConsole({ record, opponents, venues }: Props) {
             <button
               className="button-secondary-light"
               type="button"
+              disabled={isBusy || !canManageGames || form.status === "final"}
+              onClick={() => void finalizeAndLock()}
+            >
+              Mark final + lock
+            </button>
+            <button
+              className="button-secondary-light"
+              type="button"
               disabled={isBusy || !canManageGames || form.status === "archived"}
               onClick={() => void archiveNow()}
             >
@@ -513,7 +589,31 @@ export function GameAdminConsole({ record, opponents, venues }: Props) {
             >
               Undo archive
             </button>
+            <button
+              className="mini-button"
+              type="button"
+              disabled={isBusy || !canManageGames || (form.status !== "final" && form.status !== "archived")}
+              onClick={() => setShowReopenPanel((current) => !current)}
+            >
+              {showReopenPanel ? "Cancel reopen" : "Reopen final game"}
+            </button>
           </div>
+          {showReopenPanel ? (
+            <div className="stack-sm">
+              <label className="field">
+                <span>Reopen reason (required)</span>
+                <textarea rows={3} value={reopenReason} onChange={(event) => setReopenReason(event.target.value)} />
+              </label>
+              <div className="timeline-actions">
+                <button className="mini-button" type="button" onClick={() => setShowReopenPanel(false)}>
+                  Keep closed
+                </button>
+                <button className="button-primary button-primary-small" type="button" disabled={isBusy || !canManageGames} onClick={() => void reopenFinalGame()}>
+                  Confirm reopen
+                </button>
+              </div>
+            </div>
+          ) : null}
           {archiveUndoTargetStatus && form.status === "archived" && undoSecondsRemaining > 0 ? (
             <div className="kicker">Undo window: {undoSecondsRemaining}s remaining.</div>
           ) : null}

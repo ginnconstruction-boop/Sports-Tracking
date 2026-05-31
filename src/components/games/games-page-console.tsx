@@ -102,6 +102,21 @@ function renderKickoff(value?: string | null) {
   return new Date(value).toLocaleString();
 }
 
+function pilotReadiness(group: { upcoming: GameRow[]; inProgress: GameRow[]; final: GameRow[] }) {
+  const total = group.upcoming.length + group.inProgress.length + group.final.length;
+  const hasInProgress = group.inProgress.length > 0;
+  const finalized = group.final.length;
+  const ratio = total === 0 ? 0 : finalized / total;
+
+  if (hasInProgress && finalized > 0) {
+    return { level: "green", note: "Active workflow and completed games are both present." };
+  }
+  if (hasInProgress || ratio >= 0.5) {
+    return { level: "yellow", note: "Partially ready. Keep running live + postgame closeout." };
+  }
+  return { level: "red", note: "Needs more completed game reps before pilot test handoff." };
+}
+
 export function GamesPageConsole() {
   const [statusText, setStatusText] = useState("Loading games...");
   const [games, setGames] = useState<GameRow[]>([]);
@@ -458,7 +473,12 @@ export function GamesPageConsole() {
                 <h2 style={{ margin: 0 }}>{group.title}</h2>
                 <p className="kicker">{group.organizationName}</p>
               </div>
+              {(() => {
+                const readiness = pilotReadiness(group);
+                return <span className="chip">Pilot readiness: {readiness.level}</span>;
+              })()}
             </div>
+            <div className="kicker">{pilotReadiness(group).note}</div>
 
             {([
               ["In progress", group.inProgress],
