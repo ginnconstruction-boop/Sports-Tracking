@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { logServerError } from "@/lib/server/observability";
 import { getRuntimeConnectionSummary } from "@/lib/server/runtime-diagnostics";
+import { storageBuckets } from "@/lib/storage/buckets";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -59,13 +60,50 @@ export async function GET() {
       }
     })();
 
+    const exportReadiness = await (async () => {
+      const issues: string[] = [];
+      let reportExportsTableReady = true;
+      let exportStorageBucketReady = true;
+
+      try {
+        const { error } = await supabaseAdmin.from("report_exports").select("id").limit(1);
+        if (error) {
+          throw error;
+        }
+      } catch (error) {
+        reportExportsTableReady = false;
+        issues.push(error instanceof Error ? `report_exports query failed: ${error.message}` : "report_exports query failed.");
+      }
+
+      try {
+        const buckets = await supabaseAdmin.storage.listBuckets();
+        if (buckets.error) {
+          throw buckets.error;
+        }
+        exportStorageBucketReady = (buckets.data ?? []).some((bucket) => bucket.name === storageBuckets.exports);
+        if (!exportStorageBucketReady) {
+          issues.push(`Storage bucket "${storageBuckets.exports}" is missing.`);
+        }
+      } catch (error) {
+        exportStorageBucketReady = false;
+        issues.push(error instanceof Error ? `storage bucket check failed: ${error.message}` : "storage bucket check failed.");
+      }
+
+      return {
+        reportExportsTableReady,
+        exportStorageBucketReady,
+        issues
+      };
+    })();
+
     return NextResponse.json({
       runtime,
       auth: {
         id: user.id,
         email: normalizedEmail
       },
-      admin
+      admin,
+      exportReadiness
     });
   } catch (error) {
     logServerError("setup-health-route", "load_failed", error, runtime);

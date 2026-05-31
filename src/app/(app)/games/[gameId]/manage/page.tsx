@@ -84,6 +84,7 @@ export default async function GameManagePage({ params }: PageProps) {
     <AppShell
       current="manage"
       gameId={gameId}
+      navMode="game_day_only"
       title="Game admin before the sideline gets chaotic."
       subtitle="Tune schedule details, venue, status, and game routing from one operational surface tied to the same game record used by Game Day and reports."
     >

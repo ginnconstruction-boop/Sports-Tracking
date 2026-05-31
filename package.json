@@ -9,6 +9,8 @@
     "lint": "eslint .",
     "test": "tsx --test tests/**/*.test.ts",
     "typecheck": "tsc --noEmit",
+    "go-test:gate": "tsx scripts/go-test-gate.ts",
+    "go-test": "npm run go-test:gate",
     "smoke:install": "playwright install chromium",
     "smoke:seed": "tsx scripts/seed-smoke.ts --mode baseline",
     "smoke:seed:full": "tsx scripts/seed-smoke.ts --mode full",

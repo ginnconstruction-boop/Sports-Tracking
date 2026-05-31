@@ -3,6 +3,7 @@ import { AppShell } from "@/components/chrome/app-shell";
 import { GameContextHeader } from "@/components/games/game-context-header";
 import { ReportExportPanel } from "@/components/reports/report-export-panel";
 import { TendencyBreakdownPanel } from "@/components/reports/tendency-breakdown-panel";
+import { hasCapability } from "@/lib/auth/roles";
 import { isFeatureEnabled } from "@/lib/features/runtime";
 import { splitTotalsByGroup } from "@/lib/domain/stat-groups";
 import { formatClock } from "@/lib/engine/clock";
@@ -73,6 +74,93 @@ function staffNotes(preview: Awaited<ReturnType<typeof getGameReportPreview>>) {
   ].filter(Boolean) as string[];
 }
 
+function topCoachInsights(
+  preview: Awaited<ReturnType<typeof getGameReportPreview>>,
+  primarySide: "home" | "away"
+) {
+  const teamTotals = preview.teamStats.find((team) => team.side === primarySide)?.totals ?? {};
+  const thirdDownAttempts = statTotal(teamTotals, "third_down_attempt");
+  const thirdDownMade = statTotal(teamTotals, "third_down_conversion");
+  const thirdDownRate = thirdDownAttempts === 0 ? 0 : Math.round((thirdDownMade / thirdDownAttempts) * 100);
+  const redZoneTrips = statTotal(teamTotals, "red_zone_trip");
+  const redZoneScores = statTotal(teamTotals, "red_zone_touchdown");
+
+  return [
+    {
+      label: "3rd down efficiency",
+      detail:
+        thirdDownAttempts === 0
+          ? "No 3rd-down attempts logged yet."
+          : `${thirdDownMade}/${thirdDownAttempts} conversions (${thirdDownRate}%).`
+    },
+    {
+      label: "Run/pass tendency",
+      detail: `Run ${formatPercent(preview.situational.summary.runRate)} | Pass ${formatPercent(preview.situational.summary.passRate)}.`
+    },
+    {
+      label: "Explosive play rate",
+      detail: `${formatPercent(preview.situational.summary.explosivePlayRate)} of tracked situational snaps were explosive plays.`
+    },
+    {
+      label: "Red zone finish",
+      detail:
+        redZoneTrips === 0
+          ? "No red-zone trips recorded."
+          : `${redZoneScores} touchdowns on ${redZoneTrips} red-zone trips.`
+    },
+    {
+      label: "Disruption summary",
+      detail: `${preview.turnoverTracker.length} turnovers and ${preview.penaltyTracker.length} penalties tagged on the timeline.`
+    }
+  ];
+}
+
+function buildPostGameChecklist(
+  preview: Awaited<ReturnType<typeof getGameReportPreview>>,
+  exportCount: number
+) {
+  const isFinalState = ["final", "archived"].includes(preview.context.status);
+
+  return [
+    {
+      label: "Play log complete",
+      complete: preview.finalSummary.totalPlays > 0,
+      detail:
+        preview.finalSummary.totalPlays > 0
+          ? `${preview.finalSummary.totalPlays} plays are available for review.`
+          : "No plays are recorded yet. Confirm live entry was captured."
+    },
+    {
+      label: "Game status locked",
+      complete: isFinalState,
+      detail: isFinalState
+        ? `Status is ${preview.context.status.replaceAll("_", " ")}.`
+        : "Move game status to Final before coach packet handoff."
+    },
+    {
+      label: "Scoring timeline reviewed",
+      complete: preview.scoringSummary.length > 0 || (preview.finalSummary.score.home === 0 && preview.finalSummary.score.away === 0),
+      detail:
+        preview.scoringSummary.length > 0
+          ? `${preview.scoringSummary.length} scoring events listed in the timeline.`
+          : "No scoring events listed. Confirm score and summary are correct."
+    },
+    {
+      label: "Penalty + turnover audit",
+      complete: true,
+      detail: `${preview.penaltyTracker.length} penalties and ${preview.turnoverTracker.length} turnovers are available for spot-checking.`
+    },
+    {
+      label: "Export generated",
+      complete: exportCount > 0,
+      detail:
+        exportCount > 0
+          ? `${exportCount} export jobs have been created for this game.`
+          : "Run at least one export (PDF/XLSX) before sharing with staff."
+    }
+  ];
+}
+
 export default async function ReportsPage({ params }: PageProps) {
   if (!isFeatureEnabled("reports_preview")) {
     notFound();
@@ -89,7 +177,11 @@ export default async function ReportsPage({ params }: PageProps) {
   const showAnalytics = isFeatureEnabled("advanced_analytics");
   const showPublic = isFeatureEnabled("live_public_tracker");
   const showInternalReview = isFeatureEnabled("internal_debug_tools");
+  const canRequestExports = hasCapability(record.currentUserRole, "export_reports");
   const coachNotes = staffNotes(preview);
+  const primarySide = record.game.homeAway;
+  const coachInsights = topCoachInsights(preview, primarySide);
+  const postGameChecklist = buildPostGameChecklist(preview, exports.length);
   const offenseLabel =
     record.game.homeAway === "home" ? `${preview.context.homeTeam} offense` : `${preview.context.awayTeam} offense`;
   const defenseLabel =
@@ -99,6 +191,7 @@ export default async function ReportsPage({ params }: PageProps) {
     <AppShell
       gameId={gameId}
       current="reports"
+      navMode="game_day_only"
       title="Reports and exports stay downstream from the play log."
       subtitle="The preview on this screen is built from the canonical report document, and the player/team stat tables remain projections of the same ordered event history."
     >
@@ -248,6 +341,40 @@ export default async function ReportsPage({ params }: PageProps) {
           </div>
         </section>
 
+        <section className="two-column">
+          <section className="section-card pad-lg stack-md">
+            <div className="entry-header">
+              <h2 style={{ margin: 0 }}>Top 5 coach insights</h2>
+              <span className="chip">Game-plan signal</span>
+            </div>
+            <div className="table-like">
+              {coachInsights.map((item) => (
+                <div className="timeline-card" key={item.label}>
+                  <strong>{item.label}</strong>
+                  <div className="kicker">{item.detail}</div>
+                </div>
+              ))}
+            </div>
+          </section>
+          <section className="section-card pad-lg stack-md">
+            <div className="entry-header">
+              <h2 style={{ margin: 0 }}>Post-game correction checklist</h2>
+              <span className="chip">Closeout gate</span>
+            </div>
+            <div className="table-like">
+              {postGameChecklist.map((item) => (
+                <div className="timeline-card" key={item.label}>
+                  <div className="timeline-top">
+                    <strong>{item.label}</strong>
+                    <span className="chip">{item.complete ? "complete" : "needs action"}</span>
+                  </div>
+                  <div className="kicker">{item.detail}</div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </section>
+
         <section className="section-card pad-lg stack-md">
           <div className="entry-header">
             <h2 style={{ margin: 0 }}>Situational tendency board</h2>
@@ -303,7 +430,7 @@ export default async function ReportsPage({ params }: PageProps) {
           </div>
 
           <div className="section-card pad-lg stack-md">
-            <ReportExportPanel gameId={gameId} initialExports={exports} />
+            <ReportExportPanel gameId={gameId} initialExports={exports} canRequestExports={canRequestExports} />
             <div className="timeline-actions">
               {showAnalytics ? (
                 <Link className="mini-button" href="/analytics">

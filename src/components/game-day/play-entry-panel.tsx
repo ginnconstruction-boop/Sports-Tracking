@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { GameDayPlayView, GameDaySnapshot } from "@/lib/domain/game-day";
 import type { PlayParticipant, PlayPenalty, PlayType, TeamSide } from "@/lib/domain/play-log";
-import { formatClock } from "@/lib/engine/clock";
+import { formatClock, parseClockToSeconds } from "@/lib/engine/clock";
 import { midpointSequence } from "@/lib/engine/sequence";
 import { isFeatureEnabled } from "@/lib/features/runtime";
 
@@ -1042,7 +1042,63 @@ function validateSubmission(form: FormState) {
     return "Spot fouls need a foul spot yard line.";
   }
 
+  if (
+    (form.playType === "run" || form.playType === "pass" || form.playType === "turnover") &&
+    !/^-?\d+$/.test(form.yards)
+  ) {
+    return "Yards must be a whole number.";
+  }
+
+  if (form.playType === "sack" && !/^\d+$/.test(form.yardsLost)) {
+    return "Sack yards lost must be a whole number.";
+  }
+
+  if ((form.playType === "punt" || form.playType === "kickoff" || form.playType === "field_goal") && !/^\d+$/.test(form.kickDistance)) {
+    return "Kick or punt distance must be a whole number.";
+  }
+
+  if (
+    (form.playType === "punt" || form.playType === "kickoff" || form.playType === "turnover" || (form.playType === "pass" && form.passResult === "interception")) &&
+    !/^-?\d+$/.test(form.returnYards)
+  ) {
+    return "Return yards must be a whole number.";
+  }
+
   return null;
+}
+
+function collectSubmissionWarnings(snapshot: GameDaySnapshot, form: FormState, intent: PlayEntryIntent) {
+  const warnings: string[] = [];
+  const state = snapshot.currentState;
+  const clockSeconds = parseClockToSeconds(form.clock);
+
+  if (intent.kind === "append") {
+    if (form.quarter !== state.quarter) {
+      warnings.push(`Quarter is ${form.quarter}, but live state is Q${state.quarter}.`);
+    }
+
+    if (form.possession !== state.possession) {
+      warnings.push(
+        `Possession is ${form.possession === "home" ? "Home" : "Visitor"}, but live state is ${
+          state.possession === "home" ? "Home" : "Visitor"
+        }.`
+      );
+    }
+
+    if (clockSeconds > state.clockSeconds + 2) {
+      warnings.push(`Clock (${form.clock}) is ahead of live state (${formatClock(state.clockSeconds)}).`);
+    }
+  }
+
+  if (state.phase === "kickoff" && ["run", "pass", "sack", "turnover"].includes(form.playType)) {
+    warnings.push("Game state is kickoff phase, but selected play type is not kickoff.");
+  }
+
+  if (state.phase !== "kickoff" && form.playType === "kickoff") {
+    warnings.push("Selected play type is kickoff, but game state is not kickoff phase.");
+  }
+
+  return warnings;
 }
 
 function formatDownLabel(down: number) {
@@ -1261,6 +1317,18 @@ export function PlayEntryPanel({
     if (validationError) {
       setFormError(validationError);
       return;
+    }
+
+    const warnings = collectSubmissionWarnings(snapshot, form, intent);
+    if (warnings.length > 0) {
+      const shouldProceed = window.confirm(
+        `Sanity check:\n- ${warnings.join("\n- ")}\n\nSubmit anyway?`
+      );
+
+      if (!shouldProceed) {
+        setFormError("Submission cancelled. Update the entry fields and submit again.");
+        return;
+      }
     }
 
     const offense = form.possession;

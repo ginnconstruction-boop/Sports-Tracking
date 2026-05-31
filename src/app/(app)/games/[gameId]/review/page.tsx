@@ -25,6 +25,7 @@ export default async function GameReviewPage({ params }: PageProps) {
     <AppShell
       gameId={gameId}
       current="review"
+      navMode="game_day_only"
       title="Postgame review stays tied to the play log."
       subtitle="Tags, coaching notes, and film references are attached to exact plays, so review work stays aligned with live stat history and report output."
     >

@@ -288,6 +288,8 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
   const [latestScoreCorrection, setLatestScoreCorrection] = useState<ScoreCorrection | null>(null);
   const [scoreCorrections, setScoreCorrections] = useState<ScoreCorrection[]>([]);
   const [liveStatusPromoted, setLiveStatusPromoted] = useState(false);
+  const [lastGoodSnapshot, setLastGoodSnapshot] = useState<GameDaySnapshot | null>(initialSnapshot);
+  const [lastGoodPlayLog, setLastGoodPlayLog] = useState<PlayRecord[]>([]);
 
   function captureClientIssue(event: string, error: unknown, context: Record<string, unknown> = {}) {
     const details =
@@ -376,6 +378,8 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
     setSession(opened.item);
     setSnapshot(live.item);
     setPlayLog(plays.items);
+    setLastGoodSnapshot(live.item);
+    setLastGoodPlayLog(plays.items);
     setSituationCorrections(corrections.items);
     setLatestSituationCorrection(latestActiveCorrection(corrections.items));
     setScoreCorrections(scoreCorrectionItems.items);
@@ -464,6 +468,8 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
       startTransition(() => {
         setSnapshot(live.item);
         setPlayLog(plays.items);
+        setLastGoodSnapshot(live.item);
+        setLastGoodPlayLog(plays.items);
         setSituationCorrections(corrections.items);
         setLatestSituationCorrection(latestActiveCorrection(corrections.items));
         setScoreCorrections(scoreCorrectionItems.items);
@@ -533,6 +539,8 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
     if (cachedGame) {
       setSnapshot(cachedGame.snapshot);
       setPlayLog(cachedGame.playLog);
+      setLastGoodSnapshot(cachedGame.snapshot);
+      setLastGoodPlayLog(cachedGame.playLog);
       setStatusText("Loaded cached sideline state.");
     }
 
@@ -1021,6 +1029,8 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
         : session;
 
       setSnapshot(response.live);
+      setLastGoodSnapshot(response.live);
+      setLastGoodPlayLog(playLog);
       if (nextSession) {
         setSession(nextSession);
       }
@@ -1069,6 +1079,8 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
         : session;
 
       setSnapshot(response.live);
+      setLastGoodSnapshot(response.live);
+      setLastGoodPlayLog(playLog);
       setSituationCorrections(nextCorrections);
       setLatestSituationCorrection(latestActiveCorrection(nextCorrections));
       if (nextSession) {
@@ -1083,6 +1095,50 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
       setErrorText(error instanceof Error ? error.message : "Unable to void situation correction.");
       setStatusText("Unable to void situation correction.");
       throw error;
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function restoreLastGoodState() {
+    setErrorText(null);
+    setBusyAction("restore-last-good");
+    setStatusText("Restoring last good state...");
+
+    try {
+      const cached = await getOfflineGameCache(gameId);
+      const fallbackSnapshot = cached?.snapshot ?? lastGoodSnapshot;
+      const fallbackPlayLog = cached?.playLog ?? lastGoodPlayLog;
+
+      if (!fallbackSnapshot) {
+        setStatusText("No synced snapshot is available yet.");
+        return;
+      }
+
+      const restoredSession: GameSessionRecord | null = session
+        ? {
+            ...session,
+            status: isOffline ? "local_only" : session.status,
+            localRevision: fallbackSnapshot.revision,
+            pendingMutationCount: 0,
+            lastSyncError: null
+          }
+        : null;
+
+      await replaceOutboxMutations(gameId, []);
+      setPendingMutations(0);
+      setSnapshot(fallbackSnapshot);
+      setPlayLog(fallbackPlayLog);
+      if (restoredSession) {
+        setSession(restoredSession);
+      }
+      await persistLocalState(fallbackSnapshot, fallbackPlayLog, restoredSession ?? session);
+      setStatusText("Last good state restored.");
+      setErrorText(null);
+    } catch (error) {
+      captureClientIssue("restore_last_good_state_failed", error);
+      setErrorText(error instanceof Error ? error.message : "Unable to restore last good state.");
+      setStatusText("Restore failed.");
     } finally {
       setBusyAction(null);
     }
@@ -1109,6 +1165,8 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
 
       const nextCorrections = [response.item, ...scoreCorrections.filter((item) => item.id !== response.item.id)];
       setSnapshot(response.live);
+      setLastGoodSnapshot(response.live);
+      setLastGoodPlayLog(playLog);
       setScoreCorrections(nextCorrections);
       setLatestScoreCorrection(latestActiveScoreCorrection(nextCorrections));
       if (nextSession) {
@@ -1156,6 +1214,8 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
         : session;
 
       setSnapshot(response.live);
+      setLastGoodSnapshot(response.live);
+      setLastGoodPlayLog(playLog);
       setScoreCorrections(nextCorrections);
       setLatestScoreCorrection(latestActiveScoreCorrection(nextCorrections));
       if (nextSession) {
@@ -1220,6 +1280,8 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
     onEditPlay: (play: GameDayPlayView) => setIntent({ kind: "edit", play }),
     onInsertBefore: (play: GameDayPlayView) => setIntent({ kind: "insert", beforePlay: play }),
     onRefresh: () => void refreshLiveSnapshot(),
+    onRestoreLastGoodState: () => void restoreLastGoodState(),
+    canRestoreLastGoodState: Boolean(lastGoodSnapshot || lastGoodPlayLog.length > 0),
     onRetrySync: () => {
       if (deviceKey) {
         void flushOutbox(deviceKey);

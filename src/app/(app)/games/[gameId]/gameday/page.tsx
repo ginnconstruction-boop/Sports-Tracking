@@ -27,6 +27,7 @@ export default async function GameDayPage({ params }: PageProps) {
     <AppShell
       gameId={gameId}
       current="gameday"
+      navMode="game_day_only"
       title="Game Day Overview"
       subtitle="Overview, review, correction, and navigation for the current game. Jump into Live Entry when you need a distraction-free sideline input surface."
     >

@@ -6,17 +6,30 @@ type AppShellProps = {
   title: string;
   subtitle: string;
   children: React.ReactNode;
-  current?: "home" | "games" | "onboarding" | "setup" | "analytics" | "admin" | "gameday" | "live" | "reports" | "manage" | "review";
+  current?:
+    | "home"
+    | "games"
+    | "onboarding"
+    | "setup"
+    | "analytics"
+    | "admin"
+    | "gameday"
+    | "live"
+    | "reports"
+    | "manage"
+    | "review"
+    | "guide";
   gameId?: string;
+  navMode?: "default" | "game_day_only";
 };
 
-export function AppShell({ title, subtitle, children, current, gameId }: AppShellProps) {
+export function AppShell({ title, subtitle, children, current, gameId, navMode = "default" }: AppShellProps) {
   const showAnalytics = isFeatureEnabled("advanced_analytics");
   const showAdmin = isFeatureEnabled("internal_debug_tools");
   const showGameDay = isFeatureEnabled("game_day_mode");
   const showReports = isFeatureEnabled("reports_preview");
   const showReview = isFeatureEnabled("internal_debug_tools");
-  const nav = [
+  const defaultNav = [
     { href: "/", label: "Operations", key: "home" },
     { href: "/games", label: "Games", key: "games" },
     { href: "/onboarding", label: "Onboarding", key: "onboarding" },
@@ -33,8 +46,25 @@ export function AppShell({ title, subtitle, children, current, gameId }: AppShel
     ...(gameId && showReports
       ? [{ href: `/games/${gameId}/reports`, label: "Reports", key: "reports" as const }]
       : []),
+    ...(gameId ? [{ href: `/games/${gameId}/operator-guide`, label: "Operator Guide", key: "guide" as const }] : []),
     ...(gameId && showReview ? [{ href: `/games/${gameId}/review`, label: "Review", key: "review" as const }] : [])
   ] as const;
+  const gameDayOnlyNav = [
+    { href: "/games", label: "Games", key: "games" as const },
+    ...(gameId ? [{ href: `/games/${gameId}/manage`, label: "Game Admin", key: "manage" as const }] : []),
+    ...(gameId && showGameDay
+      ? [
+          { href: `/games/${gameId}/gameday`, label: "Overview", key: "gameday" as const },
+          { href: `/games/${gameId}/live`, label: "Enter Live Mode", key: "live" as const }
+        ]
+      : []),
+    ...(gameId && showReports
+      ? [{ href: `/games/${gameId}/reports`, label: "Reports", key: "reports" as const }]
+      : []),
+    ...(gameId ? [{ href: `/games/${gameId}/operator-guide`, label: "Operator Guide", key: "guide" as const }] : []),
+    ...(gameId && showReview ? [{ href: `/games/${gameId}/review`, label: "Review", key: "review" as const }] : [])
+  ] as const;
+  const nav = navMode === "game_day_only" ? gameDayOnlyNav : defaultNav;
 
   return (
     <div className="page-shell stack-lg">

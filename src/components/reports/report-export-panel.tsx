@@ -19,6 +19,7 @@ type ExportJob = {
 type Props = {
   gameId: string;
   initialExports: ExportJob[];
+  canRequestExports?: boolean;
 };
 
 type ReportsGetResponse = {
@@ -86,7 +87,7 @@ function exportFormatLabel(format: ExportFormat) {
   return format.toUpperCase();
 }
 
-export function ReportExportPanel({ gameId, initialExports }: Props) {
+export function ReportExportPanel({ gameId, initialExports, canRequestExports = true }: Props) {
   const exportFormats = getEnabledExportFormats().filter(
     (format): format is Extract<ExportFormat, "pdf" | "xlsx"> => format === "pdf" || format === "xlsx"
   );
@@ -142,7 +143,7 @@ export function ReportExportPanel({ gameId, initialExports }: Props) {
           {exportFormats.map((format, index) => (
             <button
               className={index === 0 ? "button-primary button-primary-small" : "button-secondary button-secondary-light"}
-              disabled={isPending}
+              disabled={isPending || !canRequestExports}
               key={format}
               type="button"
               onClick={() => void requestExport(format)}
@@ -163,6 +164,9 @@ export function ReportExportPanel({ gameId, initialExports }: Props) {
       </div>
 
       {errorText ? <div className="error-note">{errorText}</div> : null}
+      {!canRequestExports ? (
+        <div className="kicker">Your role can review exports, but only coaches/admin can generate new export jobs.</div>
+      ) : null}
 
       <div className="table-like">
         {exports.length === 0 ? <div className="kicker">No exports yet for this game.</div> : null}
@@ -187,7 +191,7 @@ export function ReportExportPanel({ gameId, initialExports }: Props) {
               ) : (
                 <span className="kicker">Artifact link becomes available when the job completes.</span>
               )}
-              {exportFormats.includes(job.format as (typeof exportFormats)[number]) ? (
+              {canRequestExports && exportFormats.includes(job.format as (typeof exportFormats)[number]) ? (
                 <button className="mini-button" type="button" onClick={() => void requestExport(job.format as (typeof exportFormats)[number])}>
                   Re-run
                 </button>

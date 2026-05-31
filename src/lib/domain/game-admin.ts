@@ -1,4 +1,5 @@
 import type { OrganizationBranding } from "@/lib/domain/organization-settings";
+import type { MembershipRole } from "@/lib/auth/roles";
 
 export type GameAdminRecord = {
   game: {
@@ -52,4 +53,5 @@ export type GameAdminRecord = {
     home: string;
     away: string;
   };
+  currentUserRole: MembershipRole;
 };

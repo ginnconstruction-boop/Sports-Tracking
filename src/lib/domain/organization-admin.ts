@@ -11,7 +11,11 @@ export type OrganizationDiagnostics = {
   liveGameCount: number;
   publicShareCount: number;
   exportCount: number;
+  exportReadiness: {
+    reportExportsTableReady: boolean;
+    exportStorageBucketReady: boolean;
+    issues: string[];
+  };
   activeSeasonCount: number;
   lastGameKickoffAt?: string | null;
 };
-

@@ -43,9 +43,11 @@ export async function getGameAdminRecord(
 ): Promise<GameAdminRecord> {
   const context = await getGameContext(gameId);
   const supabaseAdmin = createSupabaseAdminClient();
+  let currentUserRole: GameAdminRecord["currentUserRole"] = "admin";
 
   if (!options.skipAuth) {
-    await requireOrganizationRole(context.team.organization_id, "read_only");
+    const access = await requireOrganizationRole(context.team.organization_id, "read_only");
+    currentUserRole = access.membership.role;
   }
 
   const [organizationResult, opponentResult, venueResult, sidesResult] = await Promise.all([
@@ -162,6 +164,7 @@ export async function getGameAdminRecord(
     sideLabels: {
       home: sides.find((side) => side.side === "home")?.display_name ?? "Home",
       away: sides.find((side) => side.side === "away")?.display_name ?? "Away"
-    }
+    },
+    currentUserRole
   };
 }

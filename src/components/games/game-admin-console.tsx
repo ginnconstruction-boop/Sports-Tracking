@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import type { Route } from "next";
+import { useEffect, useMemo, useState } from "react";
 import { gameStatusValues } from "@/lib/contracts/admin";
+import { hasCapability } from "@/lib/auth/roles";
 import { isFeatureEnabled } from "@/lib/features/runtime";
 import type { GameAdminRecord } from "@/lib/domain/game-admin";
 
@@ -91,6 +93,11 @@ export function GameAdminConsole({ record, opponents, venues }: Props) {
   const [adminRecord, setAdminRecord] = useState(record);
   const [statusText, setStatusText] = useState("Game admin ready.");
   const [isBusy, setIsBusy] = useState(false);
+  const [archiveUndoTargetStatus, setArchiveUndoTargetStatus] = useState<FormState["status"] | null>(null);
+  const [archiveUndoExpiresAt, setArchiveUndoExpiresAt] = useState<number | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const canManageGames = hasCapability(adminRecord.currentUserRole, "manage_games");
+  const canWriteLivePlays = hasCapability(adminRecord.currentUserRole, "write_live_plays");
   const [form, setForm] = useState<FormState>({
     opponentId: record.opponent.id,
     venueId: record.venue?.id ?? "",
@@ -121,8 +128,31 @@ export function GameAdminConsole({ record, opponents, venues }: Props) {
       .filter(Boolean)
       .join(", ");
   }, [adminRecord.venue]);
+  const undoSecondsRemaining = archiveUndoExpiresAt ? Math.max(0, Math.ceil((archiveUndoExpiresAt - nowMs) / 1000)) : 0;
+
+  useEffect(() => {
+    if (!archiveUndoExpiresAt) {
+      return;
+    }
+
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [archiveUndoExpiresAt]);
+
+  useEffect(() => {
+    if (!archiveUndoExpiresAt || nowMs <= archiveUndoExpiresAt) {
+      return;
+    }
+    setArchiveUndoTargetStatus(null);
+    setArchiveUndoExpiresAt(null);
+  }, [archiveUndoExpiresAt, nowMs]);
 
   async function saveGame() {
+    if (!canManageGames) {
+      setStatusText("This role can view game admin details, but cannot save changes.");
+      return;
+    }
+
     setIsBusy(true);
     setStatusText("Saving game details...");
 
@@ -192,6 +222,11 @@ export function GameAdminConsole({ record, opponents, venues }: Props) {
   }
 
   async function confirmRoster() {
+    if (!canManageGames) {
+      setStatusText("This role can view game admin details, but cannot confirm roster changes.");
+      return;
+    }
+
     setIsBusy(true);
     setStatusText("Confirming game roster...");
 
@@ -222,6 +257,75 @@ export function GameAdminConsole({ record, opponents, venues }: Props) {
     const url = `${publicBaseUrl}/${kind}/${adminRecord.game.publicShareToken}`;
     await navigator.clipboard.writeText(url);
     setStatusText(`Copied public ${kind === "games" ? "live tracker" : "report"} link.`);
+  }
+
+  async function saveGameWithStatus(nextStatus: FormState["status"]) {
+    if (!canManageGames) {
+      setStatusText("Only game managers can archive or restore status.");
+      return;
+    }
+
+    setIsBusy(true);
+    setStatusText(nextStatus === "archived" ? "Archiving game..." : "Restoring game status...");
+
+    try {
+      const response = await readJson<{ item: GameAdminRecord["game"] }>(`/api/v1/games/${adminRecord.game.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          seasonId: adminRecord.season.id,
+          opponentId: form.opponentId,
+          venueId: form.venueId || undefined,
+          kickoffAt: form.kickoffAt ? new Date(form.kickoffAt).toISOString() : undefined,
+          arrivalAt: form.arrivalAt ? new Date(form.arrivalAt).toISOString() : undefined,
+          reportAt: form.reportAt ? new Date(form.reportAt).toISOString() : undefined,
+          homeAway: form.homeAway,
+          status: nextStatus,
+          weatherConditions: form.weatherConditions || undefined,
+          fieldConditions: form.fieldConditions || undefined,
+          staffNotes: form.staffNotes || undefined,
+          opponentPrepNotes: form.opponentPrepNotes || undefined,
+          logisticsNotes: form.logisticsNotes || undefined,
+          publicLiveEnabled: form.publicLiveEnabled,
+          publicReportsEnabled: form.publicReportsEnabled
+        })
+      });
+
+      setAdminRecord((current) => ({
+        ...current,
+        game: {
+          ...current.game,
+          status: response.item.status
+        }
+      }));
+      setForm((current) => ({
+        ...current,
+        status: response.item.status as FormState["status"]
+      }));
+      setStatusText(nextStatus === "archived" ? "Game archived." : "Game status restored.");
+    } catch (error) {
+      setStatusText(messageFromError(error, "Unable to update game status."));
+      throw error;
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function archiveNow() {
+    const priorStatus = form.status;
+    await saveGameWithStatus("archived");
+    setArchiveUndoTargetStatus(priorStatus);
+    setArchiveUndoExpiresAt(Date.now() + 120_000);
+  }
+
+  async function undoArchive() {
+    if (!archiveUndoTargetStatus || !archiveUndoExpiresAt || Date.now() > archiveUndoExpiresAt) {
+      setStatusText("Undo window expired.");
+      return;
+    }
+
+    await saveGameWithStatus(archiveUndoTargetStatus);
+    setArchiveUndoTargetStatus(null);
+    setArchiveUndoExpiresAt(null);
   }
 
   return (
@@ -272,9 +376,17 @@ export function GameAdminConsole({ record, opponents, venues }: Props) {
             <h2 style={{ margin: 0 }}>Edit game details</h2>
             <div className="timeline-actions">
               <Link className="mini-button" href={`/games/${adminRecord.game.id}/gameday`}>Open Game Day</Link>
+              {canWriteLivePlays ? <Link className="mini-button" href={`/games/${adminRecord.game.id}/live`}>Open live entry</Link> : null}
               <Link className="mini-button" href={`/games/${adminRecord.game.id}/reports`}>Open reports</Link>
+              <Link className="mini-button" href={`/games/${adminRecord.game.id}/operator-guide` as Route}>Operator guide</Link>
             </div>
           </div>
+
+          {!canManageGames ? (
+            <div className="kicker">
+              Your role is view-only on game management actions. Coaches/admin can save, confirm roster, and archive.
+            </div>
+          ) : null}
 
           <div className="form-grid">
             <label className="field">
@@ -351,6 +463,7 @@ export function GameAdminConsole({ record, opponents, venues }: Props) {
             <label className="checkbox-field">
               <input
                 type="checkbox"
+                disabled={!canManageGames}
                 checked={form.publicLiveEnabled}
                 onChange={(event) => setForm((current) => ({ ...current, publicLiveEnabled: event.target.checked }))}
               />
@@ -361,6 +474,7 @@ export function GameAdminConsole({ record, opponents, venues }: Props) {
             <label className="checkbox-field">
               <input
                 type="checkbox"
+                disabled={!canManageGames}
                 checked={form.publicReportsEnabled}
                 onChange={(event) => setForm((current) => ({ ...current, publicReportsEnabled: event.target.checked }))}
               />
@@ -370,13 +484,39 @@ export function GameAdminConsole({ record, opponents, venues }: Props) {
           </div>
 
           <div className="timeline-actions">
-            <button className="button-primary" type="button" disabled={isBusy} onClick={() => void saveGame()}>
+            <button className="button-primary" type="button" disabled={isBusy || !canManageGames} onClick={() => void saveGame()}>
               Save game details
             </button>
-            <button className="button-secondary-light" type="button" disabled={isBusy} onClick={() => void confirmRoster()}>
+            <button className="button-secondary-light" type="button" disabled={isBusy || !canManageGames} onClick={() => void confirmRoster()}>
               Confirm game roster
             </button>
+            <button
+              className="button-secondary-light"
+              type="button"
+              disabled={isBusy || !canManageGames || form.status === "archived"}
+              onClick={() => void archiveNow()}
+            >
+              Archive game
+            </button>
+            <button
+              className="mini-button"
+              type="button"
+              disabled={
+                isBusy ||
+                !canManageGames ||
+                form.status !== "archived" ||
+                !archiveUndoTargetStatus ||
+                !archiveUndoExpiresAt ||
+                nowMs > archiveUndoExpiresAt
+              }
+              onClick={() => void undoArchive()}
+            >
+              Undo archive
+            </button>
           </div>
+          {archiveUndoTargetStatus && form.status === "archived" && undoSecondsRemaining > 0 ? (
+            <div className="kicker">Undo window: {undoSecondsRemaining}s remaining.</div>
+          ) : null}
         </div>
 
         <div className="section-card pad-lg stack-md">

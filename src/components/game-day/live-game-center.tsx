@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { Route } from "next";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { GameAdminRecord } from "@/lib/domain/game-admin";
 import type { GameDayPlayView, GameDaySnapshot } from "@/lib/domain/game-day";
@@ -39,6 +40,8 @@ type Props = {
   onEditPlay: (play: GameDayPlayView) => void;
   onInsertBefore: (play: GameDayPlayView) => void;
   onRefresh: () => void;
+  onRestoreLastGoodState: () => void;
+  canRestoreLastGoodState: boolean;
   onRetrySync: () => void;
   onReleaseWriter: () => void;
   onReacquireWriter: () => void;
@@ -519,6 +522,8 @@ function LivePrimaryControlStrip({
   onToggleTheme,
   onToggleCompactMode,
   onRefresh,
+  onRestoreLastGoodState,
+  canRestoreLastGoodState,
   onRetrySync,
   onReleaseWriter,
   onReacquireWriter,
@@ -539,6 +544,8 @@ function LivePrimaryControlStrip({
   onToggleTheme: () => void;
   onToggleCompactMode: () => void;
   onRefresh: () => void;
+  onRestoreLastGoodState: () => void;
+  canRestoreLastGoodState: boolean;
   onRetrySync: () => void;
   onReleaseWriter: () => void;
   onReacquireWriter: () => void;
@@ -682,6 +689,14 @@ function LivePrimaryControlStrip({
         </button>
         <button
           className="mini-button"
+          disabled={busyAction !== null || !canRestoreLastGoodState}
+          type="button"
+          onClick={onRestoreLastGoodState}
+        >
+          Restore last good state
+        </button>
+        <button
+          className="mini-button"
           disabled={busyAction !== null || !hasDeviceKey || pendingMutations === 0}
           type="button"
           onClick={onRetrySync}
@@ -710,6 +725,9 @@ function LivePrimaryControlStrip({
         </Link>
         <Link className="mini-button" href={`/games/${gameId}/reports`}>
           Reports
+        </Link>
+        <Link className="mini-button" href={`/games/${gameId}/operator-guide` as Route}>
+          Operator guide
         </Link>
       </div>
       {latestSituationCorrection ? (
@@ -1105,6 +1123,8 @@ export function LiveGameCenter({
   onEditPlay,
   onInsertBefore,
   onRefresh,
+  onRestoreLastGoodState,
+  canRestoreLastGoodState,
   onRetrySync,
   onReleaseWriter,
   onReacquireWriter,
@@ -1179,6 +1199,8 @@ export function LiveGameCenter({
         onToggleTheme={() => setTheme((current) => (current === "broadcast" ? "contrast" : "broadcast"))}
         onToggleCompactMode={onToggleCompactMode}
         onRefresh={onRefresh}
+        onRestoreLastGoodState={onRestoreLastGoodState}
+        canRestoreLastGoodState={canRestoreLastGoodState}
         onRetrySync={onRetrySync}
         onReleaseWriter={onReleaseWriter}
         onReacquireWriter={onReacquireWriter}
@@ -1229,6 +1251,8 @@ export function LiveEntryCenter({
   onInsertBefore,
   onFreshPlay,
   onReacquireWriter,
+  onRestoreLastGoodState,
+  canRestoreLastGoodState,
   onRecoverSituation,
   onOverrideScore,
   onVoidScoreCorrection
@@ -1443,6 +1467,9 @@ export function LiveEntryCenter({
             <Link className="mini-button live-entry-exit-button" href={`/games/${gameId}/reports`}>
               Reports
             </Link>
+            <Link className="mini-button live-entry-exit-button" href={`/games/${gameId}/operator-guide` as Route}>
+              Operator guide
+            </Link>
             <Link className="mini-button live-entry-exit-button" href="/games">
               Games
             </Link>
@@ -1468,8 +1495,8 @@ export function LiveEntryCenter({
               </ul>
             </div>
             <div className="live-entry-viewer-actions" data-testid="state-correction-controls">
-              <button
-                className="button-primary live-entry-primary-cta"
+            <button
+              className="button-primary live-entry-primary-cta"
                 data-testid="live-entry-try-writer"
                 disabled={!hasDeviceKey || isOffline || busyAction !== null}
                 type="button"
@@ -1477,12 +1504,20 @@ export function LiveEntryCenter({
               >
                 {busyAction === "lease" ? "Requesting writer lease..." : "Try writer lease"}
               </button>
-              <Link className="mini-button live-entry-viewer-secondary" href={`/games/${gameId}/gameday`}>
-                Return to overview
-              </Link>
-              <Link className="mini-button live-entry-viewer-secondary" href="/games#fresh-live-entry">
-                Create fresh game
-              </Link>
+            <Link className="mini-button live-entry-viewer-secondary" href={`/games/${gameId}/gameday`}>
+              Return to overview
+            </Link>
+            <button
+              className="mini-button live-entry-viewer-secondary"
+              disabled={!canRestoreLastGoodState}
+              type="button"
+              onClick={onRestoreLastGoodState}
+            >
+              Restore last good state
+            </button>
+            <Link className="mini-button live-entry-viewer-secondary" href="/games#fresh-live-entry">
+              Create fresh game
+            </Link>
               <p className="live-entry-viewer-note">
                 Single-writer protection stays in place. If another session still holds the lease, this page remains read-only.
               </p>
@@ -1529,6 +1564,16 @@ export function LiveEntryCenter({
               <span className="eyebrow live-board-eyebrow">Situation</span>
               <strong>Edit live state</strong>
               <span>Ball spot, down, distance, possession, and quarter.</span>
+            </button>
+            <button
+              className="live-entry-state-action"
+              disabled={!canRestoreLastGoodState}
+              type="button"
+              onClick={onRestoreLastGoodState}
+            >
+              <span className="eyebrow live-board-eyebrow">Recovery</span>
+              <strong>Restore last good state</strong>
+              <span>Reload the most recent synced snapshot when local state drifts.</span>
             </button>
           </section>
         ) : null}

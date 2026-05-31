@@ -96,6 +96,9 @@ export function OrganizationAdminConsole({ memberships }: Props) {
                 <span className="chip">{diagnostics.gameCount} games</span>
                 <span className="chip">{diagnostics.exportCount} exports</span>
                 <span className="chip">
+                  Exports {diagnostics.exportReadiness.reportExportsTableReady && diagnostics.exportReadiness.exportStorageBucketReady ? "ready" : "needs setup"}
+                </span>
+                <span className="chip">
                   {diagnostics.lastGameKickoffAt
                     ? new Date(diagnostics.lastGameKickoffAt).toLocaleString()
                     : "No kickoff yet"}
@@ -131,6 +134,19 @@ export function OrganizationAdminConsole({ memberships }: Props) {
                       ? "Exports have already been generated from canonical report documents."
                       : "No report exports generated yet. Run a game report to validate staff workflows."}
                   </div>
+                  <div className="pill-row">
+                    <span className="chip">
+                      report_exports {diagnostics.exportReadiness.reportExportsTableReady ? "ok" : "issue"}
+                    </span>
+                    <span className="chip">
+                      exports bucket {diagnostics.exportReadiness.exportStorageBucketReady ? "ok" : "issue"}
+                    </span>
+                  </div>
+                  {diagnostics.exportReadiness.issues.map((issue) => (
+                    <div className="kicker" key={issue}>
+                      {issue}
+                    </div>
+                  ))}
                 </div>
               </div>
             </section>

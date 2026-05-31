@@ -28,3 +28,8 @@ export const roleCapabilities: Record<MembershipRole, string[]> = {
   read_only: []
 };
 
+export type RoleCapability = (typeof roleCapabilities)[MembershipRole][number];
+
+export function hasCapability(role: MembershipRole, capability: RoleCapability) {
+  return roleCapabilities[role].includes(capability);
+}
