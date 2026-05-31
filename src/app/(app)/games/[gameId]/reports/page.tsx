@@ -2,6 +2,8 @@ import Link from "next/link";
 import { AppShell } from "@/components/chrome/app-shell";
 import { GameContextHeader } from "@/components/games/game-context-header";
 import { ReportExportPanel } from "@/components/reports/report-export-panel";
+import { TendencyBreakdownPanel } from "@/components/reports/tendency-breakdown-panel";
+import { buildTendencyBreakdown } from "@/lib/analytics/tendency-breakdown";
 import { isFeatureEnabled } from "@/lib/features/runtime";
 import { splitTotalsByGroup } from "@/lib/domain/stat-groups";
 import { formatClock } from "@/lib/engine/clock";
@@ -88,6 +90,11 @@ export default async function ReportsPage({ params }: PageProps) {
   const showPublic = isFeatureEnabled("live_public_tracker");
   const showInternalReview = isFeatureEnabled("internal_debug_tools");
   const coachNotes = staffNotes(preview);
+  const tendency = buildTendencyBreakdown(preview.fullTimeline, record.game.homeAway);
+  const offenseLabel =
+    record.game.homeAway === "home" ? `${preview.context.homeTeam} offense` : `${preview.context.awayTeam} offense`;
+  const defenseLabel =
+    record.game.homeAway === "home" ? `${preview.context.homeTeam} defense` : `${preview.context.awayTeam} defense`;
 
   return (
     <AppShell
@@ -270,6 +277,13 @@ export default async function ReportsPage({ params }: PageProps) {
             ))}
           </div>
         </section>
+
+        <TendencyBreakdownPanel
+          offenseLabel={offenseLabel}
+          defenseLabel={defenseLabel}
+          offense={tendency.offense}
+          defense={tendency.defense}
+        />
 
         <section className="two-column">
           <div className="section-card pad-lg stack-md">
