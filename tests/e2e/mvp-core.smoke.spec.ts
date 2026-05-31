@@ -237,6 +237,28 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
         );
       }
 
+      if (!match && !setupMode()) {
+        const createdTeam = await browserJson<{ item?: { id: string; name: string } }>(page, "/api/v1/teams", {
+          method: "POST",
+          body: JSON.stringify({
+            organizationId,
+            name: smoke.team.name,
+            level: smoke.team.level
+          })
+        });
+        expect([201, 500].includes(createdTeam.status)).toBeTruthy();
+
+        const refreshedTeams = await browserJson<{ items: Array<{ id: string; name: string }> }>(
+          page,
+          `/api/v1/teams?organizationId=${organizationId}`
+        );
+        expect(refreshedTeams.status).toBe(200);
+        match = pickPreferredMatch(
+          Array.isArray(refreshedTeams.body.items) ? refreshedTeams.body.items : [],
+          (item) => item.name === smoke.team.name
+        );
+      }
+
       expect(match).toBeTruthy();
       teamId = match!.id;
       teamName = match!.name;
@@ -257,6 +279,29 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
         await page.getByRole("button", { name: "Create season" }).click();
 
         await expect(page.getByRole("button", { name: "3. Season done" })).toBeVisible();
+
+        const refreshedSeasons = await browserJson<{ items: Array<{ id: string; label: string }> }>(
+          page,
+          `/api/v1/seasons?teamId=${teamId}`
+        );
+        expect(refreshedSeasons.status).toBe(200);
+        match = pickPreferredMatch(
+          Array.isArray(refreshedSeasons.body.items) ? refreshedSeasons.body.items : [],
+          (item) => item.label === smoke.season.label
+        );
+      }
+
+      if (!match && !setupMode()) {
+        const createdSeason = await browserJson<{ item?: { id: string; label: string } }>(page, "/api/v1/seasons", {
+          method: "POST",
+          body: JSON.stringify({
+            teamId,
+            label: smoke.season.label,
+            year: smoke.season.year,
+            isActive: true
+          })
+        });
+        expect([201, 500].includes(createdSeason.status)).toBeTruthy();
 
         const refreshedSeasons = await browserJson<{ items: Array<{ id: string; label: string }> }>(
           page,
@@ -299,6 +344,33 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
         );
       }
 
+      if (!match && !setupMode()) {
+        const createdOpponent = await browserJson<{ item?: { id: string; schoolName: string } }>(
+          page,
+          "/api/v1/opponents",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              organizationId,
+              schoolName: smoke.opponent.schoolName,
+              mascot: smoke.opponent.mascot,
+              shortCode: smoke.opponent.shortCode
+            })
+          }
+        );
+        expect([201, 500].includes(createdOpponent.status)).toBeTruthy();
+
+        const refreshedOpponents = await browserJson<{ items: Array<{ id: string; schoolName: string }> }>(
+          page,
+          `/api/v1/opponents?organizationId=${organizationId}`
+        );
+        expect(refreshedOpponents.status).toBe(200);
+        match = pickPreferredMatch(
+          Array.isArray(refreshedOpponents.body.items) ? refreshedOpponents.body.items : [],
+          (item) => item.schoolName === smoke.opponent.schoolName
+        );
+      }
+
       expect(match).toBeTruthy();
       opponentId = match!.id;
       opponentName = match!.schoolName;
@@ -320,6 +392,29 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
         await page.getByRole("button", { name: "Create venue" }).click();
 
         await expect(page.getByRole("button", { name: "4. Opponent + venue done" })).toBeVisible();
+
+        const refreshedVenues = await browserJson<{ items: Array<{ id: string; name: string }> }>(
+          page,
+          `/api/v1/venues?organizationId=${organizationId}`
+        );
+        expect(refreshedVenues.status).toBe(200);
+        match = pickPreferredMatch(
+          Array.isArray(refreshedVenues.body.items) ? refreshedVenues.body.items : [],
+          (item) => item.name === smoke.venue.name
+        );
+      }
+
+      if (!match && !setupMode()) {
+        const createdVenue = await browserJson<{ item?: { id: string; name: string } }>(page, "/api/v1/venues", {
+          method: "POST",
+          body: JSON.stringify({
+            organizationId,
+            name: smoke.venue.name,
+            city: smoke.venue.city,
+            state: smoke.venue.state
+          })
+        });
+        expect([201, 500].includes(createdVenue.status)).toBeTruthy();
 
         const refreshedVenues = await browserJson<{ items: Array<{ id: string; name: string }> }>(
           page,
