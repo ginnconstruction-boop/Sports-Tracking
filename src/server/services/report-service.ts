@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import { buildTendencyBreakdown, type TendencyLine } from "@/lib/analytics/tendency-breakdown";
 import type { ExportFormat, GameReportDocument, ReportType } from "@/lib/domain/reports";
 import { assertFeatureEnabled } from "@/lib/features/server";
 import { isExportFormatEnabled } from "@/lib/features/runtime";
@@ -8,7 +9,7 @@ import { storageBuckets } from "@/lib/storage/buckets";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { logServerError } from "@/lib/server/observability";
 import { getDb } from "@/server/db/client";
-import { reportExports } from "@/server/db/schema";
+import { games, opponents, reportExports } from "@/server/db/schema";
 import { getGameAdminRecord } from "@/server/services/game-admin-service";
 import { getGameDaySnapshot } from "@/server/services/game-day-service";
 import { requireGameRole } from "@/server/services/game-access";
@@ -32,6 +33,185 @@ type ReportExportTableRow = {
   completed_at: string | null;
   created_at: string;
 };
+
+export type GameTendencyDataset = {
+  key: string;
+  label: string;
+  gameCount: number;
+  offense: TendencyLine[];
+  defense: TendencyLine[];
+};
+
+function mergeTendencyLines(lines: TendencyLine[]): TendencyLine {
+  const totals = lines.reduce(
+    (acc, line) => {
+      acc.plays += line.plays;
+      acc.runs += line.runs;
+      acc.passes += line.passes;
+      acc.conversions += line.conversions;
+      acc.totalYards += line.yardsPerPlay * line.plays;
+      acc.successes += (line.successRate / 100) * line.plays;
+      return acc;
+    },
+    { plays: 0, runs: 0, passes: 0, conversions: 0, totalYards: 0, successes: 0 }
+  );
+
+  const playCount = totals.plays;
+  const runRate = playCount === 0 ? 0 : Number(((totals.runs / playCount) * 100).toFixed(1));
+  const passRate = playCount === 0 ? 0 : Number(((totals.passes / playCount) * 100).toFixed(1));
+  const successRate = playCount === 0 ? 0 : Number(((totals.successes / playCount) * 100).toFixed(1));
+  const conversionRate = playCount === 0 ? 0 : Number(((totals.conversions / playCount) * 100).toFixed(1));
+  const yardsPerPlay = playCount === 0 ? 0 : Number((totals.totalYards / playCount).toFixed(2));
+
+  const seed = lines[0];
+  if (!seed) {
+    return {
+      key: "third_down",
+      label: "3rd down",
+      plays: 0,
+      runs: 0,
+      passes: 0,
+      runRate: 0,
+      passRate: 0,
+      yardsPerPlay: 0,
+      successRate: 0,
+      conversions: 0,
+      conversionRate: 0
+    };
+  }
+
+  return {
+    key: seed.key,
+    label: seed.label,
+    plays: playCount,
+    runs: totals.runs,
+    passes: totals.passes,
+    runRate,
+    passRate,
+    yardsPerPlay,
+    successRate,
+    conversions: totals.conversions,
+    conversionRate
+  };
+}
+
+function mergeBreakdownLines(breakdowns: Array<{ offense: TendencyLine[]; defense: TendencyLine[] }>) {
+  if (breakdowns.length === 0) {
+    return {
+      offense: [] as TendencyLine[],
+      defense: [] as TendencyLine[]
+    };
+  }
+
+  const keys = breakdowns[0].offense.map((line) => line.key);
+  const offense = keys.map((key) =>
+    mergeTendencyLines(
+      breakdowns
+        .map((breakdown) => breakdown.offense.find((line) => line.key === key))
+        .filter(Boolean) as TendencyLine[]
+    )
+  );
+  const defense = keys.map((key) =>
+    mergeTendencyLines(
+      breakdowns
+        .map((breakdown) => breakdown.defense.find((line) => line.key === key))
+        .filter(Boolean) as TendencyLine[]
+    )
+  );
+
+  return { offense, defense };
+}
+
+export async function getGameTendencyDatasets(gameId: string): Promise<GameTendencyDataset[]> {
+  assertFeatureEnabled("reports_preview");
+  const access = await requireGameRole(gameId, "read_only");
+  const db = getDb();
+
+  const seasonGames = await db.query.games.findMany({
+    where: eq(games.seasonId, access.game.seasonId)
+  });
+
+  const targetGame = seasonGames.find((game) => game.id === gameId);
+  if (!targetGame) {
+    throw new Error("Game not found in season.");
+  }
+
+  const uniqueOpponentIds = [...new Set(seasonGames.map((game) => game.opponentId))];
+  const opponentRows = await Promise.all(
+    uniqueOpponentIds.map((opponentId) =>
+      db.query.opponents.findFirst({
+        where: eq(opponents.id, opponentId)
+      })
+    )
+  );
+  const opponentLabelById = new Map(
+    opponentRows
+      .filter((row): row is NonNullable<typeof row> => Boolean(row))
+      .map((row) => [row.id, row.schoolName])
+  );
+
+  const sorted = [...seasonGames].sort((left, right) => {
+    const leftTime = (left.kickoffAt ?? left.createdAt).getTime();
+    const rightTime = (right.kickoffAt ?? right.createdAt).getTime();
+    return rightTime - leftTime;
+  });
+
+  const targetTime = (targetGame.kickoffAt ?? targetGame.createdAt).getTime();
+  const throughTarget = sorted.filter((game) => (game.kickoffAt ?? game.createdAt).getTime() <= targetTime);
+  const lastThree = throughTarget.slice(0, 3);
+
+  const reportRows = await Promise.all(
+    seasonGames.map(async (game) => {
+      const report = await buildGameReportDocument(game.id, "game_report", "read_only", { skipAuth: true });
+      return {
+        game,
+        breakdown: buildTendencyBreakdown(report.fullTimeline, game.homeAway)
+      };
+    })
+  );
+  const breakdownByGame = new Map(reportRows.map((row) => [row.game.id, row.breakdown]));
+
+  function datasetForGames(key: string, label: string, selectedGameIds: string[]): GameTendencyDataset {
+    const selectedBreakdowns = selectedGameIds
+      .map((id) => breakdownByGame.get(id))
+      .filter((item): item is NonNullable<typeof item> => Boolean(item));
+    const merged = mergeBreakdownLines(selectedBreakdowns);
+
+    return {
+      key,
+      label,
+      gameCount: selectedBreakdowns.length,
+      offense: merged.offense,
+      defense: merged.defense
+    };
+  }
+
+  const datasets: GameTendencyDataset[] = [
+    datasetForGames("game", "This game", [gameId]),
+    datasetForGames("last_3", "Last 3 games", lastThree.map((game) => game.id)),
+    datasetForGames("season", "Season to date", throughTarget.map((game) => game.id))
+  ];
+
+  for (const opponentId of uniqueOpponentIds) {
+    const vsOpponentGameIds = throughTarget
+      .filter((game) => game.opponentId === opponentId)
+      .map((game) => game.id);
+
+    if (vsOpponentGameIds.length === 0) {
+      continue;
+    }
+
+    datasets.push(
+      datasetForGames(
+        `opponent:${opponentId}`,
+        `vs ${opponentLabelById.get(opponentId) ?? "Opponent"}`,
+        vsOpponentGameIds
+      )
+    );
+  }
+
+  return datasets;
+}
 
 function mapReportExportRow(row: ReportExportTableRow): ReportExportRow {
   return {

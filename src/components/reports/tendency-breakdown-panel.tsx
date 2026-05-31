@@ -3,21 +3,39 @@
 import { useMemo, useState } from "react";
 import type { TendencyLine } from "@/lib/analytics/tendency-breakdown";
 
+type TendencyDataset = {
+  key: string;
+  label: string;
+  gameCount: number;
+  offense: TendencyLine[];
+  defense: TendencyLine[];
+};
+
 type Props = {
   offenseLabel: string;
   defenseLabel: string;
-  offense: TendencyLine[];
-  defense: TendencyLine[];
+  datasets: TendencyDataset[];
 };
 
 function formatPercent(value: number) {
   return `${value.toFixed(1)}%`;
 }
 
-export function TendencyBreakdownPanel({ offenseLabel, defenseLabel, offense, defense }: Props) {
+export function TendencyBreakdownPanel({ offenseLabel, defenseLabel, datasets }: Props) {
   const [mode, setMode] = useState<"offense" | "defense">("offense");
+  const [datasetKey, setDatasetKey] = useState<string>(datasets[0]?.key ?? "game");
 
-  const lines = useMemo(() => (mode === "offense" ? offense : defense), [mode, offense, defense]);
+  const activeDataset = useMemo(
+    () => datasets.find((dataset) => dataset.key === datasetKey) ?? datasets[0] ?? null,
+    [datasetKey, datasets]
+  );
+
+  const lines = useMemo(() => {
+    if (!activeDataset) {
+      return [];
+    }
+    return mode === "offense" ? activeDataset.offense : activeDataset.defense;
+  }, [mode, activeDataset]);
   const titleLabel = mode === "offense" ? offenseLabel : defenseLabel;
 
   return (
@@ -27,6 +45,20 @@ export function TendencyBreakdownPanel({ offenseLabel, defenseLabel, offense, de
         <span className="chip">{titleLabel}</span>
       </div>
       <div className="pill-row">
+        <label className="kicker" htmlFor="tendency-dataset">
+          Scope
+        </label>
+        <select
+          id="tendency-dataset"
+          value={datasetKey}
+          onChange={(event) => setDatasetKey(event.target.value)}
+        >
+          {datasets.map((dataset) => (
+            <option key={dataset.key} value={dataset.key}>
+              {dataset.label} ({dataset.gameCount})
+            </option>
+          ))}
+        </select>
         <button
           className={mode === "offense" ? "button-primary button-primary-small" : "button-secondary button-secondary-light"}
           type="button"
@@ -44,6 +76,7 @@ export function TendencyBreakdownPanel({ offenseLabel, defenseLabel, offense, de
       </div>
 
       <div className="table-like">
+        {!activeDataset ? <div className="kicker">No tendency data available yet.</div> : null}
         {lines.map((line) => (
           <div className="timeline-card" key={`${mode}-${line.key}`}>
             <div className="timeline-top">

@@ -3,14 +3,13 @@ import { AppShell } from "@/components/chrome/app-shell";
 import { GameContextHeader } from "@/components/games/game-context-header";
 import { ReportExportPanel } from "@/components/reports/report-export-panel";
 import { TendencyBreakdownPanel } from "@/components/reports/tendency-breakdown-panel";
-import { buildTendencyBreakdown } from "@/lib/analytics/tendency-breakdown";
 import { isFeatureEnabled } from "@/lib/features/runtime";
 import { splitTotalsByGroup } from "@/lib/domain/stat-groups";
 import { formatClock } from "@/lib/engine/clock";
 import { notFound } from "next/navigation";
 import { getGameDaySnapshot } from "@/server/services/game-day-service";
 import { getGameAdminRecord } from "@/server/services/game-admin-service";
-import { getGameReportPreview, listGameExports } from "@/server/services/report-service";
+import { getGameReportPreview, getGameTendencyDatasets, listGameExports } from "@/server/services/report-service";
 
 export const dynamic = "force-dynamic";
 
@@ -79,18 +78,18 @@ export default async function ReportsPage({ params }: PageProps) {
     notFound();
   }
   const { gameId } = await params;
-  const [snapshot, preview, exports, record] = await Promise.all([
+  const [snapshot, preview, exports, record, tendencyDatasets] = await Promise.all([
     getGameDaySnapshot(gameId, "read_only"),
     getGameReportPreview(gameId),
     listGameExports(gameId),
-    getGameAdminRecord(gameId)
+    getGameAdminRecord(gameId),
+    getGameTendencyDatasets(gameId)
   ]);
   const showDriveSummary = isFeatureEnabled("drive_summary");
   const showAnalytics = isFeatureEnabled("advanced_analytics");
   const showPublic = isFeatureEnabled("live_public_tracker");
   const showInternalReview = isFeatureEnabled("internal_debug_tools");
   const coachNotes = staffNotes(preview);
-  const tendency = buildTendencyBreakdown(preview.fullTimeline, record.game.homeAway);
   const offenseLabel =
     record.game.homeAway === "home" ? `${preview.context.homeTeam} offense` : `${preview.context.awayTeam} offense`;
   const defenseLabel =
@@ -281,8 +280,7 @@ export default async function ReportsPage({ params }: PageProps) {
         <TendencyBreakdownPanel
           offenseLabel={offenseLabel}
           defenseLabel={defenseLabel}
-          offense={tendency.offense}
-          defense={tendency.defense}
+          datasets={tendencyDatasets}
         />
 
         <section className="two-column">
