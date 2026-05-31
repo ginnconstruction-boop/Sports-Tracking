@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { getEnabledExportFormats } from "@/lib/features/runtime";
 import type { ExportFormat } from "@/lib/domain/reports";
+import { readPilotSetting } from "@/lib/pilot-settings/client";
 
 type ExportJob = {
   id: string;
@@ -107,8 +108,13 @@ export function ReportExportPanel({ gameId, initialExports, canRequestExports = 
     (format): format is Extract<ExportFormat, "pdf" | "xlsx"> => format === "pdf" || format === "xlsx"
   );
   const [exports, setExports] = useState(initialExports);
+  const [showCoachReadyShortcut, setShowCoachReadyShortcut] = useState(true);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    setShowCoachReadyShortcut(readPilotSetting("coach_ready_shortcuts", true));
+  }, []);
 
   async function refreshExports() {
     try {
@@ -155,14 +161,16 @@ export function ReportExportPanel({ gameId, initialExports, canRequestExports = 
           </p>
         </div>
         <div className="pill-row">
-          <button
-            className="button-secondary button-secondary-light"
-            disabled={isPending || !canRequestExports || !exportFormats.includes("pdf")}
-            type="button"
-            onClick={() => void requestExport("pdf")}
-          >
-            Coach-ready PDF
-          </button>
+          {showCoachReadyShortcut ? (
+            <button
+              className="button-secondary button-secondary-light"
+              disabled={isPending || !canRequestExports || !exportFormats.includes("pdf")}
+              type="button"
+              onClick={() => void requestExport("pdf")}
+            >
+              Coach-ready PDF
+            </button>
+          ) : null}
           {exportFormats.map((format, index) => (
             <button
               className={index === 0 ? "button-primary button-primary-small" : "button-secondary button-secondary-light"}

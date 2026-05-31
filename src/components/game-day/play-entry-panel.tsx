@@ -6,6 +6,7 @@ import type { PlayParticipant, PlayPenalty, PlayType, TeamSide } from "@/lib/dom
 import { formatClock, parseClockToSeconds } from "@/lib/engine/clock";
 import { midpointSequence } from "@/lib/engine/sequence";
 import { isFeatureEnabled } from "@/lib/features/runtime";
+import { readPilotSetting } from "@/lib/pilot-settings/client";
 
 type PenaltyDraft = {
   id: string;
@@ -1140,7 +1141,8 @@ export function PlayEntryPanel({
 }: Props) {
   const isLiveSurface = surface === "live";
   const showAdvancedParticipantCapture = isFeatureEnabled("advanced_participant_capture");
-  const showRequiredOnlyEntryMode = isFeatureEnabled("required_fields_only_entry");
+  const requiredOnlyDefault = isFeatureEnabled("required_fields_only_entry");
+  const [showRequiredOnlyEntryMode, setShowRequiredOnlyEntryMode] = useState(requiredOnlyDefault);
   const [form, setForm] = useState<FormState>(() => createForm(snapshot));
   const [focusedField, setFocusedField] = useState<FocusField>("jerseyA");
   const [formError, setFormError] = useState<string | null>(null);
@@ -1191,6 +1193,10 @@ export function PlayEntryPanel({
       setFocusedField(participantFields[0].key);
     }
   }, [focusedField, participantFields]);
+
+  useEffect(() => {
+    setShowRequiredOnlyEntryMode(readPilotSetting("required_fields_only", requiredOnlyDefault));
+  }, [requiredOnlyDefault]);
 
   useEffect(() => {
     const next = createForm(snapshot);

@@ -7,6 +7,7 @@ import { gameStatusValues } from "@/lib/contracts/admin";
 import { hasCapability } from "@/lib/auth/roles";
 import { isFeatureEnabled } from "@/lib/features/runtime";
 import type { GameAdminRecord } from "@/lib/domain/game-admin";
+import { PilotSettingsPanel } from "@/components/games/pilot-settings-panel";
 
 type Venue = {
   id: string;
@@ -704,6 +705,8 @@ export function GameAdminConsole({ record, opponents, venues }: Props) {
           </div>
         </div>
       </section>
+
+      <PilotSettingsPanel statusText={statusText} onStatusChange={(message) => setStatusText(message)} />
     </section>
   );
 }

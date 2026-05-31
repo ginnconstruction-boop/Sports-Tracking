@@ -722,6 +722,58 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
       await expect(page.getByRole("heading", { name: "Recent plays" })).toBeVisible();
     });
 
+    await runStep("final lock + reopen guardrails", async () => {
+      await page.goto(`/games/${gameId}/manage`);
+      await page.waitForLoadState("networkidle");
+
+      const markFinalButton = page.getByRole("button", { name: "Mark final + lock" });
+      const canManageFinalStatus = (await markFinalButton.count()) > 0;
+      if (!canManageFinalStatus) {
+        await expect(page.getByRole("button", { name: "Reopen final game" })).toHaveCount(0);
+        return;
+      }
+
+      await markFinalButton.click();
+      await expect(page.getByLabel("Status")).toHaveValue("final");
+
+      await page.goto(`/games/${gameId}/gameday`);
+      await page.waitForLoadState("networkidle");
+      await expect(page.getByTestId("submit-play-button")).toBeDisabled();
+
+      await page.goto(`/games/${gameId}/manage`);
+      await page.waitForLoadState("networkidle");
+      await page.getByRole("button", { name: "Reopen final game" }).click();
+      await page.getByRole("button", { name: "Confirm reopen" }).click();
+      await expect(page.getByText("Reopen reason is required")).toBeVisible();
+
+      await page.getByLabel("Reopen reason (required)").fill("Smoke validation reopen for corrections.");
+      await page.getByRole("button", { name: "Confirm reopen" }).click();
+      await expect(page.getByText("Game reopened and set to ready.")).toBeVisible();
+    });
+
+    await runStep("writer handoff controls render and release path works", async () => {
+      await page.goto(`/games/${gameId}/gameday`);
+      await page.waitForLoadState("networkidle");
+
+      const tryWriter = page.getByRole("button", { name: /Try writer lease/i }).first();
+      if (await tryWriter.count()) {
+        await tryWriter.click();
+        await page.waitForLoadState("networkidle");
+      }
+
+      const handoffButton = page.getByRole("button", { name: "Handoff writer" }).first();
+      if (await handoffButton.count()) {
+        await handoffButton.click();
+        await expect(page.getByText("Transfer control to next device")).toBeVisible();
+        await page.getByRole("button", { name: "Release and hand off" }).click();
+        await page.waitForLoadState("networkidle");
+      }
+
+      const releaseVisible = await page.getByRole("button", { name: "Release writer" }).first().isVisible().catch(() => false);
+      const tryVisible = await page.getByRole("button", { name: /Try writer lease/i }).first().isVisible().catch(() => false);
+      expect(releaseVisible || tryVisible).toBeTruthy();
+    });
+
     await runStep("reports preview loads", async () => {
       await page.goto(`/games/${gameId}/reports`);
       await expect(page.getByText("Report preview")).toBeVisible();

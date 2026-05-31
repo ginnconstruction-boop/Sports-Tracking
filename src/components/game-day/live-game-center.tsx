@@ -10,6 +10,7 @@ import type { GameStateCorrection } from "@/lib/domain/state-corrections";
 import type { ScoreCorrection } from "@/lib/domain/score-corrections";
 import { brandingCssVariables } from "@/lib/domain/organization-settings";
 import { isFeatureEnabled } from "@/lib/features/runtime";
+import { readPilotSetting } from "@/lib/pilot-settings/client";
 
 type GameSessionSummary = {
   status: "local_only" | "syncing" | "synced" | "conflict";
@@ -589,8 +590,13 @@ function LivePrimaryControlStrip({
   const [recoverError, setRecoverError] = useState<string | null>(null);
   const [handoffOpen, setHandoffOpen] = useState(false);
   const [handoffOperatorLabel, setHandoffOperatorLabel] = useState("");
-  const minimalMode = isFeatureEnabled("game_day_minimal_mode");
+  const minimalModeDefault = isFeatureEnabled("game_day_minimal_mode");
+  const [minimalMode, setMinimalMode] = useState(minimalModeDefault);
   const canOpenRecover = Boolean(latestPlay && session?.isActiveWriter && !isOffline && hasDeviceKey);
+
+  useEffect(() => {
+    setMinimalMode(readPilotSetting("minimal_mode", minimalModeDefault));
+  }, [minimalModeDefault]);
 
   function openRecoverPanel() {
     if (!latestPlay) {
@@ -1241,7 +1247,12 @@ export function LiveGameCenter({
 
   const visibleRecentPlays = snapshot.recentPlays.slice(0, 3);
   const isWriterMode = Boolean(session?.isActiveWriter);
-  const minimalMode = isFeatureEnabled("game_day_minimal_mode");
+  const minimalModeDefault = isFeatureEnabled("game_day_minimal_mode");
+  const [minimalMode, setMinimalMode] = useState(minimalModeDefault);
+
+  useEffect(() => {
+    setMinimalMode(readPilotSetting("minimal_mode", minimalModeDefault));
+  }, [minimalModeDefault]);
 
   return (
     <section
@@ -1377,8 +1388,13 @@ export function LiveEntryCenter({
   const [scoreError, setScoreError] = useState<string | null>(null);
   const canOpenRecover = Boolean(latestPlay && isWriterMode && !isOffline && hasDeviceKey);
   const canOpenScoreEditor = Boolean(isWriterMode && !isOffline && hasDeviceKey);
-  const minimalMode = isFeatureEnabled("game_day_minimal_mode");
+  const minimalModeDefault = isFeatureEnabled("game_day_minimal_mode");
+  const [minimalMode, setMinimalMode] = useState(minimalModeDefault);
   const activeScoreAudits = scoreCorrections.slice(0, 3);
+
+  useEffect(() => {
+    setMinimalMode(readPilotSetting("minimal_mode", minimalModeDefault));
+  }, [minimalModeDefault]);
 
   useEffect(() => {
     const previous = previousScore.current;
