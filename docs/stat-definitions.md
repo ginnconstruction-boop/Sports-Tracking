@@ -17,6 +17,16 @@ Purpose: keep staff, coaches, and operators aligned on how core stats are record
 - `total_offense_yards`: run + completed-pass net plus sack yard loss.
 - `turnover_lost` / `turnover_gained`: turnovers committed/forced on legal plays.
 
+## Player Groupings In Reports
+
+Player stat cards now split credits into:
+
+- `Offense`: rushing, passing, receiving, conversion, and offense-result stats.
+- `Defense`: tackles, sacks, disruption, takeaways, and defensive returns.
+- `Special teams`: kickoff/punt/kicking attempt and make stats.
+
+This keeps one canonical player timeline while still surfacing side-of-ball context for live planning.
+
 ## Explosive Plays
 
 - Run explosive threshold: `>= 12` yards.

@@ -3,6 +3,7 @@ import { AppShell } from "@/components/chrome/app-shell";
 import { GameContextHeader } from "@/components/games/game-context-header";
 import { ReportExportPanel } from "@/components/reports/report-export-panel";
 import { isFeatureEnabled } from "@/lib/features/runtime";
+import { splitTotalsByGroup } from "@/lib/domain/stat-groups";
 import { formatClock } from "@/lib/engine/clock";
 import { notFound } from "next/navigation";
 import { getGameDaySnapshot } from "@/server/services/game-day-service";
@@ -53,6 +54,14 @@ function featuredTeamStats(totals: Record<string, number | undefined>) {
 
 function driveResultLabel(result: string) {
   return result.replaceAll("_", " ");
+}
+
+function formatPercent(value: number) {
+  return `${value.toFixed(1)}%`;
+}
+
+function situationalLabel(key: string) {
+  return key.replaceAll("_", " ");
 }
 
 function staffNotes(preview: Awaited<ReturnType<typeof getGameReportPreview>>) {
@@ -233,6 +242,35 @@ export default async function ReportsPage({ params }: PageProps) {
           </div>
         </section>
 
+        <section className="section-card pad-lg stack-md">
+          <div className="entry-header">
+            <h2 style={{ margin: 0 }}>Situational tendency board</h2>
+            <span className="chip">{preview.situational.summary.totalSituationalPlays} tracked plays</span>
+          </div>
+          <div className="pill-row">
+            <span className="chip">Success {formatPercent(preview.situational.summary.overallSuccessRate)}</span>
+            <span className="chip">Run {formatPercent(preview.situational.summary.runRate)}</span>
+            <span className="chip">Pass {formatPercent(preview.situational.summary.passRate)}</span>
+            <span className="chip">Explosive {formatPercent(preview.situational.summary.explosivePlayRate)}</span>
+          </div>
+          <div className="table-like">
+            {preview.situational.byDownDistance.map((item) => (
+              <div className="timeline-card" key={item.key}>
+                <div className="timeline-top">
+                  <strong>{situationalLabel(item.key)}</strong>
+                  <span className="mono">{item.plays} plays</span>
+                </div>
+                <div className="pill-row">
+                  <span className="chip">Runs {item.runs}</span>
+                  <span className="chip">Passes {item.passes}</span>
+                  <span className="chip">Success {formatPercent(item.successRate)}</span>
+                  <span className="chip">YPP {item.yardsPerPlay}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
         <section className="two-column">
           <div className="section-card pad-lg stack-md">
             <h2 style={{ margin: 0 }}>Scoring summary</h2>
@@ -301,7 +339,7 @@ export default async function ReportsPage({ params }: PageProps) {
           </div>
           <div className="table-like">
             {preview.playerStats.map((player) => (
-              <div className="timeline-card" key={player.gameRosterEntryId}>
+              <div className="timeline-card stack-sm" key={player.gameRosterEntryId}>
                 <div className="timeline-top">
                   <strong>
                     {player.jerseyNumber ? `#${player.jerseyNumber} ` : ""}
@@ -309,12 +347,60 @@ export default async function ReportsPage({ params }: PageProps) {
                   </strong>
                   <span className="mono">{player.side}</span>
                 </div>
-                <div className="pill-row">
-                  {statEntries(player.totals).map(([key, value]) => (
-                    <span className="chip" key={key}>
-                      {key.replaceAll("_", " ")}: {value}
-                    </span>
-                  ))}
+                {(() => {
+                  const grouped = splitTotalsByGroup(player.totals);
+                  return (
+                    <>
+                      {grouped.offense.length > 0 ? (
+                        <div className="pill-row">
+                          <span className="chip">Offense</span>
+                          {grouped.offense.map(([key, value]) => (
+                            <span className="chip" key={`${player.gameRosterEntryId}-off-${key}`}>
+                              {key.replaceAll("_", " ")}: {value}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                      {grouped.defense.length > 0 ? (
+                        <div className="pill-row">
+                          <span className="chip">Defense</span>
+                          {grouped.defense.map(([key, value]) => (
+                            <span className="chip" key={`${player.gameRosterEntryId}-def-${key}`}>
+                              {key.replaceAll("_", " ")}: {value}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                      {grouped.special_teams.length > 0 ? (
+                        <div className="pill-row">
+                          <span className="chip">Special teams</span>
+                          {grouped.special_teams.map(([key, value]) => (
+                            <span className="chip" key={`${player.gameRosterEntryId}-st-${key}`}>
+                              {key.replaceAll("_", " ")}: {value}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                      {grouped.offense.length === 0 &&
+                      grouped.defense.length === 0 &&
+                      grouped.special_teams.length === 0 ? (
+                        <div className="kicker">No non-zero stat credits yet.</div>
+                      ) : null}
+                    </>
+                  );
+                })()}
+                {statEntries(player.totals).length > 0 ? (
+                  <div className="pill-row">
+                    <span className="chip">All credits</span>
+                    {statEntries(player.totals).map(([key, value]) => (
+                      <span className="chip" key={`${player.gameRosterEntryId}-all-${key}`}>
+                        {key.replaceAll("_", " ")}: {value}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="kicker">
+                  Third down team context: {formatThirdDownLine(preview.teamStats.find((team) => team.side === player.side)?.totals ?? {})}
                 </div>
               </div>
             ))}
