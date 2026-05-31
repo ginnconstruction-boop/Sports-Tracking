@@ -88,6 +88,13 @@ type GameScoreCorrectionRow = {
   void_reason_note: string | null;
 };
 
+const PARTICIPANT_CREDIT_SHARE_KEY = "__creditShare";
+
+function readParticipantCreditShare(statPayload: Record<string, unknown> | null | undefined) {
+  const raw = statPayload?.[PARTICIPANT_CREDIT_SHARE_KEY];
+  return typeof raw === "number" && Number.isFinite(raw) && raw > 0 && raw <= 1 ? raw : undefined;
+}
+
 function normalizeSequenceToken(sequence: string | number) {
   return typeof sequence === "string" ? sequence : String(sequence);
 }
@@ -263,6 +270,7 @@ export async function projectGameFromPlayLog(
           role: participant.role as PlayParticipantRole,
           side: participant.side,
           creditUnits: participant.credit_units,
+          creditShare: readParticipantCreditShare(participant.stat_payload),
           statPayload: (participant.stat_payload ?? undefined) as Record<string, unknown> | undefined
         })),
       penalties: penalties

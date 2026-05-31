@@ -2,6 +2,7 @@ import type { GameDaySnapshot } from "@/lib/domain/game-day";
 import type { GameProjection } from "@/lib/domain/game-state";
 import type { GameReportDocument, ReportType } from "@/lib/domain/reports";
 import type { OrganizationBranding } from "@/lib/domain/organization-settings";
+import { buildGameSituationalReport } from "@/lib/analytics/situational";
 
 type ReportContextInput = GameReportDocument["context"];
 
@@ -59,6 +60,7 @@ export function buildCanonicalGameReportDocument(params: {
       totalPlays: params.projection.timeline.length,
       totalDrives: params.snapshot.driveSummaries.length
     },
+    situational: buildGameSituationalReport(params.projection.timeline),
     stats: params.projection.stats
   };
 

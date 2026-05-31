@@ -51,13 +51,15 @@ export function participant(
   gameRosterEntryId: string,
   role: PlayParticipantRole,
   side: TeamSide,
-  creditUnits = 1
+  creditUnits = 1,
+  creditShare?: number
 ): PlayParticipant {
   return {
     gameRosterEntryId,
     role,
     side,
-    creditUnits
+    creditUnits,
+    creditShare
   };
 }
 

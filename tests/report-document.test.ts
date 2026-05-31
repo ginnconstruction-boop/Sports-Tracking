@@ -88,5 +88,9 @@ test("canonical game report stays aligned with the rebuilt play log projection",
   assert.equal(report.scoringSummary[0]?.result.play.id, "play-2");
   assert.equal(report.finalSummary.totalPlays, projection.timeline.length);
   assert.equal(report.finalSummary.totalDrives, snapshot.driveSummaries.length);
+  assert.equal(report.situational.summary.totalSituationalPlays, 2);
+  assert.equal(report.situational.summary.runRate, 50);
+  assert.equal(report.situational.summary.passRate, 50);
+  assert.equal(report.situational.summary.explosivePlayRate, 50);
   assert.deepEqual(report.stats, projection.stats);
 });

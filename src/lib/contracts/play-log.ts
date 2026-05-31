@@ -15,6 +15,7 @@ export const playParticipantInputSchema = z.object({
   role: z.enum(playParticipantRoles),
   side: z.enum(["home", "away"]),
   creditUnits: z.number().int().min(1).max(4).default(1),
+  creditShare: z.number().gt(0).max(1).optional(),
   statPayload: z.record(z.string(), z.unknown()).optional()
 });
 
@@ -67,20 +68,6 @@ export const playPenaltyInputSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Spot enforcement requires a foulSpot."
-      });
-    }
-
-    if (penalty.noPlay && penalty.timing !== "live_ball") {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Only live-ball penalties can create a no-play result."
-      });
-    }
-
-    if (penalty.replayDown && penalty.timing !== "live_ball") {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Replay down can only be used on live-ball penalties."
       });
     }
 
@@ -373,6 +360,24 @@ const rawCreatePlayEventInputSchema = z
         code: z.ZodIssueCode.custom,
         message: "Touchback kickoffs cannot include return yards."
       });
+    }
+
+    for (const [index, penalty] of play.penalties.entries()) {
+      if (play.playType !== "penalty" && penalty.noPlay) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["penalties", index, "noPlay"],
+          message: "No-play penalties are only allowed on penalty-only plays."
+        });
+      }
+
+      if (play.playType !== "penalty" && penalty.replayDown && penalty.timing !== "live_ball") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["penalties", index, "replayDown"],
+          message: "Replay down can only be dead-ball on penalty-only plays."
+        });
+      }
     }
   });
 

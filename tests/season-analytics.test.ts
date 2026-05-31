@@ -47,6 +47,20 @@ function report(overrides: Partial<GameReportDocument>): GameReportDocument {
       totalPlays: 60,
       totalDrives: 8
     },
+    situational: {
+      summary: {
+        totalSituationalPlays: 0,
+        explosivePlayRate: 0,
+        overallSuccessRate: 0,
+        runRate: 0,
+        passRate: 0
+      },
+      byDownDistance: [],
+      byFieldZone: [],
+      byClock: [],
+      byScoreState: [],
+      byPlayFamily: []
+    },
     stats: {
       teamTotals: { home: {}, away: {} },
       playerTotals: {}

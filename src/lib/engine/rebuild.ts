@@ -122,6 +122,13 @@ function deriveTeamSituationalStats(timeline: RebuildTimelineItem[]) {
 
     if (earnedFirstDown) {
       addTeamTotal(totals, offense, "first_down", 1);
+      if (automaticFirstDown || play.playType === "penalty") {
+        addTeamTotal(totals, offense, "first_down_penalty", 1);
+      } else if (play.playType === "run") {
+        addTeamTotal(totals, offense, "first_down_rush", 1);
+      } else if (play.playType === "pass") {
+        addTeamTotal(totals, offense, "first_down_pass", 1);
+      }
     }
 
     const thirdDownAttempt =
@@ -138,6 +145,60 @@ function deriveTeamSituationalStats(timeline: RebuildTimelineItem[]) {
 
       if (thirdDownConverted) {
         addTeamTotal(totals, offense, "third_down_conversion", 1);
+      }
+    }
+
+    const fourthDownAttempt =
+      playStartedInNormalPhase &&
+      baseResult.metadata.downBeforePlay === 4 &&
+      legalDownPlay;
+
+    if (fourthDownAttempt) {
+      addTeamTotal(totals, offense, "fourth_down_attempt", 1);
+
+      const fourthDownConverted =
+        (offenseKeptBall && finalState.down === 1 && (baseResult.firstDownAchieved || automaticFirstDown)) ||
+        baseResult.metadata.scoringTeam === offense;
+
+      if (fourthDownConverted) {
+        addTeamTotal(totals, offense, "fourth_down_conversion", 1);
+      }
+    }
+
+    if (legalDownPlay && play.playType === "run") {
+      const payload = play.payload as RunPlayPayload;
+      addTeamTotal(totals, offense, "total_offense_yards", payload.yards);
+    }
+
+    if (legalDownPlay && play.playType === "pass") {
+      const payload = play.payload as PassPlayPayload;
+      if (payload.result === "complete") {
+        addTeamTotal(totals, offense, "total_offense_yards", payload.yards);
+      }
+    }
+
+    if (legalDownPlay && play.playType === "sack") {
+      const payload = play.payload as SackPlayPayload;
+      addTeamTotal(totals, offense, "sacks_allowed", 1);
+      addTeamTotal(totals, offense, "sack_yards_lost", payload.yardsLost);
+      addTeamTotal(totals, offense, "total_offense_yards", -payload.yardsLost);
+    }
+
+    const turnoverLostByOffense =
+      play.playType === "turnover" ||
+      (play.playType === "pass" && (play.payload as PassPlayPayload).result === "interception") ||
+      (play.playType === "run" && (play.payload as RunPlayPayload).fumbleLost === true) ||
+      (play.playType === "sack" && (play.payload as SackPlayPayload).fumbleLost === true);
+
+    if (legalDownPlay && turnoverLostByOffense) {
+      addTeamTotal(totals, offense, "turnover_lost", 1);
+      addTeamTotal(totals, flipSide(offense), "turnover_gained", 1);
+    }
+
+    if (legalDownPlay) {
+      for (const acceptedPenalty of acceptedPenalties) {
+        addTeamTotal(totals, acceptedPenalty.penalizedSide, "penalty_count", 1);
+        addTeamTotal(totals, acceptedPenalty.penalizedSide, "penalty_yards", acceptedPenalty.yards);
       }
     }
 
@@ -778,6 +839,14 @@ export function rebuildFromPlayLog(
   let state = options.seedState ?? INITIAL_GAME_STATE;
   let correctionIndex = 0;
   let scoreCorrectionIndex = 0;
+
+  while (
+    correctionIndex < filteredCorrections.length &&
+    compareSequence(filteredCorrections[correctionIndex]!.appliesAfterSequence, state.sequenceApplied) === 0
+  ) {
+    state = applySituationCorrection(state, filteredCorrections[correctionIndex]!);
+    correctionIndex += 1;
+  }
 
   while (
     scoreCorrectionIndex < filteredScoreCorrections.length &&

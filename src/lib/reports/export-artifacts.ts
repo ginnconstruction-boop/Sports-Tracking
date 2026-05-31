@@ -9,6 +9,49 @@ function csvEscape(value: string | number) {
 }
 
 export function buildCsvReport(report: GameReportDocument) {
+  const situationalRows = [
+    ...report.situational.byDownDistance.map((item) => [
+      "situational_down_distance",
+      item.key,
+      item.plays,
+      item.successRate,
+      item.runRate,
+      item.yardsPerPlay
+    ]),
+    ...report.situational.byFieldZone.map((item) => [
+      "situational_field_zone",
+      item.key,
+      item.plays,
+      item.successRate,
+      item.runRate,
+      item.yardsPerPlay
+    ]),
+    ...report.situational.byClock.map((item) => [
+      "situational_clock",
+      item.key,
+      item.plays,
+      item.successRate,
+      item.runRate,
+      item.yardsPerPlay
+    ]),
+    ...report.situational.byScoreState.map((item) => [
+      "situational_score_state",
+      item.key,
+      item.plays,
+      item.successRate,
+      item.runRate,
+      item.yardsPerPlay
+    ]),
+    ...report.situational.byPlayFamily.map((item) => [
+      "situational_play_family",
+      item.key,
+      item.plays,
+      item.successRate,
+      item.runRate,
+      item.yardsPerPlay
+    ])
+  ];
+
   const rows = [
     ["section", "label", "value_1", "value_2", "value_3", "value_4"],
     ["context", "status", report.context.status, report.context.venueLabel, report.context.kickoffAt ?? "", ""],
@@ -29,6 +72,7 @@ export function buildCsvReport(report: GameReportDocument) {
       drive.playCount,
       drive.result
     ]),
+    ...situationalRows,
     ...report.fullTimeline.map((item) => [
       "play",
       item.sequence,
@@ -102,11 +146,22 @@ function buildWorkbook(report: GameReportDocument) {
     }))
   );
 
+  const situationalSheet = XLSX.utils.json_to_sheet(
+    [
+      ...report.situational.byDownDistance.map((item) => ({ category: "down_distance", ...item })),
+      ...report.situational.byFieldZone.map((item) => ({ category: "field_zone", ...item })),
+      ...report.situational.byClock.map((item) => ({ category: "clock", ...item })),
+      ...report.situational.byScoreState.map((item) => ({ category: "score_state", ...item })),
+      ...report.situational.byPlayFamily.map((item) => ({ category: "play_family", ...item }))
+    ]
+  );
+
   XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
   XLSX.utils.book_append_sheet(workbook, playsSheet, "Timeline");
   XLSX.utils.book_append_sheet(workbook, drivesSheet, "Drives");
   XLSX.utils.book_append_sheet(workbook, teamStatsSheet, "Team Stats");
   XLSX.utils.book_append_sheet(workbook, playerStatsSheet, "Player Stats");
+  XLSX.utils.book_append_sheet(workbook, situationalSheet, "Situational");
 
   return workbook;
 }
@@ -162,6 +217,15 @@ async function buildPdfReport(report: GameReportDocument) {
       `Q${play.result.finalState.quarter} ${formatClock(play.result.finalState.clockSeconds)} - ${play.result.summary}`
     );
   }
+
+  writeLine("");
+  writeLine("Situational Summary", 13, true);
+  writeLine(
+    `Plays: ${report.situational.summary.totalSituationalPlays} | Success: ${report.situational.summary.overallSuccessRate}% | Explosive: ${report.situational.summary.explosivePlayRate}%`
+  );
+  writeLine(
+    `Run rate: ${report.situational.summary.runRate}% | Pass rate: ${report.situational.summary.passRate}%`
+  );
 
   return pdf.save();
 }

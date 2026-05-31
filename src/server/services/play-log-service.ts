@@ -112,6 +112,27 @@ type GameRevisionRow = {
   current_revision: number;
 };
 
+const PARTICIPANT_CREDIT_SHARE_KEY = "__creditShare";
+
+function readParticipantCreditShare(statPayload: Record<string, unknown> | null | undefined) {
+  const raw = statPayload?.[PARTICIPANT_CREDIT_SHARE_KEY];
+  return typeof raw === "number" && Number.isFinite(raw) && raw > 0 && raw <= 1 ? raw : undefined;
+}
+
+function withParticipantCreditShare(
+  statPayload: Record<string, unknown> | null | undefined,
+  creditShare: number | undefined
+) {
+  if (creditShare === undefined) {
+    return statPayload ?? null;
+  }
+
+  return {
+    ...(statPayload ?? {}),
+    [PARTICIPANT_CREDIT_SHARE_KEY]: creditShare
+  };
+}
+
 async function bumpGameRevision(tx: DbTransaction, gameId: string) {
   const game = await tx.query.games.findFirst({
     where: eq(games.id, gameId)
@@ -261,6 +282,7 @@ export async function listPlayEvents(gameId: string) {
             role: participant.role as PlayParticipantRole,
             side: participant.side,
             creditUnits: participant.credit_units,
+            creditShare: readParticipantCreditShare(participant.stat_payload),
             statPayload: (participant.stat_payload ?? undefined) as Record<string, unknown> | undefined
           })),
         penalties: penalties
@@ -385,7 +407,7 @@ export async function createPlayEvent(gameId: string, input: CreatePlayEventInpu
         role: participant.role,
         side: participant.side,
         credit_units: participant.creditUnits,
-        stat_payload: participant.statPayload ?? null
+        stat_payload: withParticipantCreditShare(participant.statPayload, participant.creditShare)
       }))
     );
 
@@ -513,7 +535,7 @@ export async function updatePlayEvent(gameId: string, input: UpdatePlayEventInpu
           role: participant.role,
           side: participant.side,
           creditUnits: participant.creditUnits,
-          statPayload: participant.statPayload
+          statPayload: withParticipantCreditShare(participant.statPayload, participant.creditShare)
         }))
       );
     }
@@ -556,6 +578,9 @@ export async function updatePlayEvent(gameId: string, input: UpdatePlayEventInpu
           role: participant.role,
           side: participant.side,
           creditUnits: participant.creditUnits,
+          creditShare: readParticipantCreditShare(
+            participant.statPayload as Record<string, unknown> | null | undefined
+          ),
           statPayload: participant.statPayload
         })),
         penalties: existingPenalties.map((penalty) => ({
@@ -643,6 +668,9 @@ export async function deletePlayEvent(gameId: string, playId: string) {
           role: participant.role,
           side: participant.side,
           creditUnits: participant.creditUnits,
+          creditShare: readParticipantCreditShare(
+            participant.statPayload as Record<string, unknown> | null | undefined
+          ),
           statPayload: participant.statPayload
         })),
         penalties: existingPenalties.map((penalty) => ({

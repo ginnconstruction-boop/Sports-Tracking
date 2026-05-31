@@ -134,6 +134,37 @@ const sampleReport: GameReportDocument = {
     totalPlays: 120,
     totalDrives: 12
   },
+  situational: {
+    summary: {
+      totalSituationalPlays: 1,
+      explosivePlayRate: 0,
+      overallSuccessRate: 100,
+      runRate: 100,
+      passRate: 0
+    },
+    byDownDistance: [
+      {
+        key: "medium_4_6",
+        plays: 1,
+        runs: 1,
+        passes: 0,
+        yards: 6,
+        firstDowns: 1,
+        touchdowns: 0,
+        turnovers: 0,
+        explosivePlays: 0,
+        successfulPlays: 1,
+        successRate: 100,
+        runRate: 100,
+        passRate: 0,
+        yardsPerPlay: 6
+      }
+    ],
+    byFieldZone: [],
+    byClock: [],
+    byScoreState: [],
+    byPlayFamily: []
+  },
   stats: {
     teamTotals: {
       home: { rushing_yards: 182 },
@@ -150,6 +181,7 @@ test("serializeGameReport produces a readable CSV artifact", async () => {
   assert.equal(artifact.format, "csv");
   assert.equal(artifact.contentType, "text/csv");
   assert.match(String(artifact.body), /North Creek Stadium/);
+  assert.match(String(artifact.body), /situational_down_distance/);
 });
 
 test("serializeGameReport produces a multi-sheet XLSX artifact", async () => {
@@ -157,6 +189,7 @@ test("serializeGameReport produces a multi-sheet XLSX artifact", async () => {
   const workbook = XLSX.read(Buffer.from(artifact.body), { type: "buffer" });
   assert.ok(workbook.SheetNames.includes("Summary"));
   assert.ok(workbook.SheetNames.includes("Timeline"));
+  assert.ok(workbook.SheetNames.includes("Situational"));
 });
 
 test("serializeGameReport produces a PDF artifact", async () => {

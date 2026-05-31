@@ -74,6 +74,7 @@ export type PlayParticipant = {
   role: PlayParticipantRole;
   side: TeamSide;
   creditUnits: number;
+  creditShare?: number;
   statPayload?: Record<string, unknown>;
 };
 

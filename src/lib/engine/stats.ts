@@ -62,6 +62,9 @@ function playerCreditsForRole(
   stat: StatType,
   value: number
 ) {
+  const scaledValue = (participantShare?: number) =>
+    typeof participantShare === "number" ? Number((value * participantShare).toFixed(4)) : value;
+
   return play.participants
     .filter((participant) => participant.role === role && participant.gameRosterEntryId)
     .map((participant) => ({
@@ -69,7 +72,7 @@ function playerCreditsForRole(
       side: participant.side,
       gameRosterEntryId: participant.gameRosterEntryId,
       stat,
-      value
+      value: scaledValue(participant.creditShare)
     }));
 }
 
