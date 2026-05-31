@@ -21,11 +21,48 @@ function normalizeProfile(value?: string | null): LaunchProfileName | null {
     return null;
   }
 
-  if (value === "development" || value === "staging" || value === "production_mvp") {
+  if (value === "development" || value === "staging" || value === "production_mvp" || value === "pilot_core") {
     return value;
   }
 
   return null;
+}
+
+function parseBooleanOverride(rawValue?: string | null) {
+  if (!rawValue) {
+    return null;
+  }
+
+  const normalized = rawValue.trim().toLowerCase();
+  if (normalized === "true" || normalized === "1" || normalized === "on" || normalized === "yes") {
+    return true;
+  }
+  if (normalized === "false" || normalized === "0" || normalized === "off" || normalized === "no") {
+    return false;
+  }
+  return null;
+}
+
+function envOverridesForFeature(feature: FeatureKey) {
+  const publicKey = `NEXT_PUBLIC_FEATURE_OVERRIDE_${feature.toUpperCase()}` as const;
+  const serverKey = `FEATURE_OVERRIDE_${feature.toUpperCase()}` as const;
+  const publicOverride = parseBooleanOverride(process.env[publicKey]);
+  const serverOverride =
+    typeof window === "undefined" ? parseBooleanOverride(process.env[serverKey]) : null;
+
+  return serverOverride ?? publicOverride;
+}
+
+function applyFeatureOverrides(flags: Record<FeatureKey, boolean>) {
+  const next = { ...flags };
+  for (const feature of Object.keys(featureDefinitions) as FeatureKey[]) {
+    const override = envOverridesForFeature(feature);
+    if (override === null) {
+      continue;
+    }
+    next[feature] = override;
+  }
+  return next;
 }
 
 export function getLaunchProfileName(): LaunchProfileName {
@@ -41,7 +78,7 @@ export function getLaunchProfileName(): LaunchProfileName {
 }
 
 export function getFeatureFlags(profileName: LaunchProfileName = getLaunchProfileName()) {
-  return launchProfiles[profileName];
+  return applyFeatureOverrides(launchProfiles[profileName]);
 }
 
 export function isFeatureEnabled(feature: FeatureKey, profileName: LaunchProfileName = getLaunchProfileName()) {

@@ -7,7 +7,7 @@ Tracking the Game uses a code-based launch control system for V1.
 - `src/lib/features/definitions.ts`
   - typed feature registry
 - `src/lib/features/profiles.ts`
-  - launch profiles for development, staging, and production MVP
+  - launch profiles for development, staging, production MVP, and pilot core
 - `src/lib/features/runtime.ts`
   - shared server/client helpers for evaluating flags
 - `src/lib/features/server.ts`
@@ -25,6 +25,7 @@ Supported values:
 - `development`
 - `staging`
 - `production_mvp`
+- `pilot_core`
 
 If neither variable is set:
 
@@ -39,26 +40,75 @@ Enabled:
 - `resume_live_game`
 - `undo_last_play`
 - `reports_preview`
-- `csv_export`
-- `json_export`
 - `roster_import_csv`
 - `team_management`
 - `season_management`
 - `opponent_management`
 - `offline_outbox_sync`
+- `xlsx_export`
+- `pdf_export`
 
 Hidden:
 
 - `drive_summary`
 - `advanced_participant_capture`
-- `xlsx_export`
-- `pdf_export`
+- `csv_export`
+- `json_export`
 - `live_public_tracker`
 - `parent_portal`
 - `advanced_analytics`
 - `voice_input`
 - `organization_branding`
 - `internal_debug_tools`
+
+## Pilot core defaults (recommended for HS/MS field testing)
+
+Enabled:
+
+- `game_day_mode`
+- `resume_live_game`
+- `undo_last_play`
+- `reports_preview`
+- `roster_import_csv`
+- `team_management`
+- `season_management`
+- `opponent_management`
+- `offline_outbox_sync`
+
+Hidden by default:
+
+- `csv_export`
+- `json_export`
+- `xlsx_export`
+- `pdf_export`
+- `drive_summary`
+- `advanced_participant_capture`
+- `live_public_tracker`
+- `parent_portal`
+- `advanced_analytics`
+- `voice_input`
+- `organization_branding`
+- `internal_debug_tools`
+
+## Optional per-feature overrides
+
+You can selectively enable/disable any feature without changing profile by setting:
+
+- Public/client-aware override: `NEXT_PUBLIC_FEATURE_OVERRIDE_<FEATURE_KEY_UPPERCASE>`
+- Server-only override: `FEATURE_OVERRIDE_<FEATURE_KEY_UPPERCASE>`
+
+Examples:
+
+- `NEXT_PUBLIC_FEATURE_OVERRIDE_XLSX_EXPORT=true`
+- `FEATURE_OVERRIDE_INTERNAL_DEBUG_TOOLS=false`
+
+Accepted values: `true/false`, `1/0`, `on/off`, `yes/no`.
+
+When both are set, server-side override wins on the server.
+
+## Role guard note
+
+Advanced analytics now requires at least `head_coach` role (or `admin`) even when the feature is enabled.
 
 ## How to use flags
 

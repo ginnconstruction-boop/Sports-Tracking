@@ -25,7 +25,7 @@ export async function getSeasonAnalytics(seasonId: string) {
     throw new Error("Team not found.");
   }
 
-  await requireOrganizationRole(team.organizationId, "read_only");
+  await requireOrganizationRole(team.organizationId, "head_coach");
 
   const seasonGames = await db.query.games.findMany({
     where: eq(games.seasonId, seasonId)
