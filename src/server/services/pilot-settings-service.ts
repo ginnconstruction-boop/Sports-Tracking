@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { assertFeatureEnabled } from "@/lib/features/server";
 import {
   pilotSettingDefaults,
@@ -18,6 +18,13 @@ type PilotSettingsScope = {
 type UpsertPilotSettingInput = PilotSettingsScope & {
   key: PilotSettingKey;
   enabled: boolean;
+};
+
+const defaultAuditLimit = 50;
+const maxAuditLimit = 200;
+
+type ListPilotSettingAuditHistoryInput = PilotSettingsScope & {
+  limit?: number;
 };
 
 async function assertTeamInOrganization(scope: PilotSettingsScope) {
@@ -46,6 +53,23 @@ export function shouldCreatePilotSettingAudit(previousEnabled: boolean | null, n
   return previousEnabled === null || previousEnabled !== nextEnabled;
 }
 
+export function clampPilotSettingAuditLimit(limit?: number) {
+  if (!Number.isFinite(limit)) {
+    return defaultAuditLimit;
+  }
+
+  const normalized = Math.trunc(limit as number);
+  if (normalized < 1) {
+    return 1;
+  }
+
+  if (normalized > maxAuditLimit) {
+    return maxAuditLimit;
+  }
+
+  return normalized;
+}
+
 export async function listPilotSettingsForTeam(scope: PilotSettingsScope) {
   assertFeatureEnabled("pilot_settings_server_sync");
   await requireOrganizationRole(scope.organizationId, "read_only");
@@ -64,6 +88,37 @@ export async function listPilotSettingsForTeam(scope: PilotSettingsScope) {
     organizationId: scope.organizationId,
     teamId: scope.teamId,
     items: pilotSettingKeys.map((key) => mapRecord(key, byKey.get(key)))
+  };
+}
+
+export async function listPilotSettingAuditHistory(input: ListPilotSettingAuditHistoryInput) {
+  assertFeatureEnabled("pilot_settings_server_sync");
+  await requireOrganizationRole(input.organizationId, "read_only");
+  await assertTeamInOrganization(input);
+
+  const db = getDb();
+  const limit = clampPilotSettingAuditLimit(input.limit);
+  const records = await db.query.pilotTeamSettingAudits.findMany({
+    where: and(
+      eq(pilotTeamSettingAudits.organizationId, input.organizationId),
+      eq(pilotTeamSettingAudits.teamId, input.teamId)
+    ),
+    orderBy: [desc(pilotTeamSettingAudits.changedAt)],
+    limit
+  });
+
+  return {
+    organizationId: input.organizationId,
+    teamId: input.teamId,
+    limit,
+    items: records.map((record) => ({
+      id: record.id,
+      key: record.key as PilotSettingKey,
+      previousEnabled: record.previousEnabled,
+      nextEnabled: record.nextEnabled,
+      changedByUserId: record.changedByUserId,
+      changedAt: record.changedAt.toISOString()
+    }))
   };
 }
 
