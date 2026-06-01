@@ -7,6 +7,7 @@ import { hasCapability } from "@/lib/auth/roles";
 import { isFeatureEnabled } from "@/lib/features/runtime";
 import { splitTotalsByGroup } from "@/lib/domain/stat-groups";
 import { formatClock } from "@/lib/engine/clock";
+import { buildMoneyDownCallTendency, buildSituationalCallSheet } from "@/lib/analytics/situational-call-sheet";
 import { notFound } from "next/navigation";
 import { getGameDaySnapshot } from "@/server/services/game-day-service";
 import { getGameAdminRecord } from "@/server/services/game-admin-service";
@@ -68,6 +69,14 @@ function situationalLabel(key: string) {
   return key.replaceAll("_", " ");
 }
 
+function distanceBucketLabel(key: string) {
+  if (key === "short_1_3") return "1-3";
+  if (key === "medium_4_6") return "4-6";
+  if (key === "long_7_10") return "7-10";
+  if (key === "very_long_11_plus") return "11+";
+  return key.replaceAll("_", " ");
+}
+
 function staffNotes(preview: Awaited<ReturnType<typeof getGameReportPreview>>) {
   return [
     preview.context.staffNotes,
@@ -85,7 +94,7 @@ function topCoachInsights(
   const thirdDownMade = statTotal(teamTotals, "third_down_conversion");
   const thirdDownRate = thirdDownAttempts === 0 ? 0 : Math.round((thirdDownMade / thirdDownAttempts) * 100);
   const redZoneTrips = statTotal(teamTotals, "red_zone_trip");
-  const redZoneScores = statTotal(teamTotals, "red_zone_touchdown");
+  const redZoneScores = statTotal(teamTotals, "red_zone_score");
 
   return [
     {
@@ -115,6 +124,100 @@ function topCoachInsights(
       detail: `${preview.turnoverTracker.length} turnovers and ${preview.penaltyTracker.length} penalties tagged on the timeline.`
     }
   ];
+}
+
+function fieldCoordinate(
+  position: { side: "home" | "away"; yardLine: number },
+  offense: "home" | "away"
+) {
+  return position.side === offense ? position.yardLine : 100 - position.yardLine;
+}
+
+function isLegalTimelinePlay(
+  item: Awaited<ReturnType<typeof getGameReportPreview>>["fullTimeline"][number]
+) {
+  const accepted = item.result.play.penalties.filter((penalty) => penalty.result === "accepted");
+  const hasNoPlay = accepted.some((penalty) => penalty.noPlay);
+  const hasOffsetting = item.result.play.penalties.some((penalty) => penalty.result === "offsetting");
+  return !hasNoPlay && !hasOffsetting;
+}
+
+function redZoneFinishing(
+  preview: Awaited<ReturnType<typeof getGameReportPreview>>,
+  primarySide: "home" | "away"
+) {
+  const teamTotals = preview.teamStats.find((team) => team.side === primarySide)?.totals ?? {};
+  const redZoneTrips = statTotal(teamTotals, "red_zone_trip");
+  const redZoneScores = statTotal(teamTotals, "red_zone_score");
+  const goalToGoTrips = statTotal(teamTotals, "goal_to_go_trip");
+  const goalToGoScores = statTotal(teamTotals, "goal_to_go_score");
+  const redZoneRate = redZoneTrips === 0 ? 0 : Number(((redZoneScores / redZoneTrips) * 100).toFixed(1));
+  const goalToGoRate = goalToGoTrips === 0 ? 0 : Number(((goalToGoScores / goalToGoTrips) * 100).toFixed(1));
+
+  const playerMap = new Map(
+    preview.playerStats.map((player) => [player.gameRosterEntryId, player] as const)
+  );
+  const finishingMap = new Map<string, { redZoneTouches: number; goalToGoTouches: number; redZoneScores: number }>();
+
+  for (const item of preview.fullTimeline) {
+    if (item.result.play.possession !== primarySide || !isLegalTimelinePlay(item)) {
+      continue;
+    }
+
+    const coordinate = fieldCoordinate(item.result.baseResult.metadata.previousSpot, primarySide);
+    const inRedZone = coordinate >= 80;
+    const inGoalToGo = coordinate >= 90;
+    if (!inRedZone && !inGoalToGo) {
+      continue;
+    }
+
+    const touchIds = [...new Set(
+      item.result.play.participants
+        .filter((participant) =>
+          ["ball_carrier", "runner", "passer", "target"].includes(participant.role) &&
+          participant.side === primarySide &&
+          Boolean(participant.gameRosterEntryId)
+        )
+        .map((participant) => participant.gameRosterEntryId as string)
+    )];
+
+    for (const id of touchIds) {
+      const current = finishingMap.get(id) ?? { redZoneTouches: 0, goalToGoTouches: 0, redZoneScores: 0 };
+      if (inRedZone) current.redZoneTouches += 1;
+      if (inGoalToGo) current.goalToGoTouches += 1;
+      if (item.result.baseResult.metadata.scoringTeam === primarySide) {
+        current.redZoneScores += 1;
+      }
+      finishingMap.set(id, current);
+    }
+  }
+
+  const players = [...finishingMap.entries()]
+    .map(([id, stats]) => {
+      const player = playerMap.get(id);
+      return {
+        id,
+        label: player ? `${player.jerseyNumber ? `#${player.jerseyNumber} ` : ""}${player.displayName}` : id,
+        ...stats
+      };
+    })
+    .sort(
+      (left, right) =>
+        right.redZoneTouches - left.redZoneTouches ||
+        right.goalToGoTouches - left.goalToGoTouches ||
+        right.redZoneScores - left.redZoneScores
+    )
+    .slice(0, 6);
+
+  return {
+    redZoneTrips,
+    redZoneScores,
+    redZoneRate,
+    goalToGoTrips,
+    goalToGoScores,
+    goalToGoRate,
+    players
+  };
 }
 
 function buildPostGameChecklist(
@@ -205,6 +308,9 @@ export default async function ReportsPage({ params }: PageProps) {
   const coachInsights = topCoachInsights(preview, primarySide);
   const postGameChecklist = buildPostGameChecklist(preview, exports.length);
   const completeness = reportCompleteness(preview, exports.length);
+  const situationalCallSheet = buildSituationalCallSheet(preview.fullTimeline);
+  const moneyDownCalls = buildMoneyDownCallTendency(preview.fullTimeline);
+  const finishing = redZoneFinishing(preview, primarySide);
   const scoreAuditItems = scoreCorrections.slice(0, 5);
   const opponentSnapshot = tendencyDatasets.find((dataset) => dataset.key.startsWith("opponent:")) ?? null;
   const correctionTimeline = [
@@ -508,18 +614,104 @@ export default async function ReportsPage({ params }: PageProps) {
             <span className="chip">Pass {formatPercent(preview.situational.summary.passRate)}</span>
             <span className="chip">Explosive {formatPercent(preview.situational.summary.explosivePlayRate)}</span>
           </div>
+          <strong>3rd/4th down call report</strong>
           <div className="table-like">
-            {preview.situational.byDownDistance.map((item) => (
-              <div className="timeline-card" key={item.key}>
+            {moneyDownCalls.map((item) => (
+              <div className="timeline-card" key={`money-down-${item.down}`}>
                 <div className="timeline-top">
-                  <strong>{situationalLabel(item.key)}</strong>
+                  <strong>{item.down}th down</strong>
+                  <span className="mono">{item.attempts} attempts</span>
+                </div>
+                <div className="pill-row">
+                  <span className="chip">Run {item.runCalls}</span>
+                  <span className="chip">Scramble {item.scrambleCalls}</span>
+                  <span className="chip">Pass {item.passCalls}</span>
+                  <span className="chip">Sack {item.sackCalls}</span>
+                  <span className="chip">Other {item.otherCalls}</span>
+                </div>
+                <div className="pill-row">
+                  <span className="chip">
+                    Conversions {item.conversions}/{item.attempts}
+                  </span>
+                  <span className="chip">Conversion rate {formatPercent(item.conversionRate)}</span>
+                  <span className="chip">YPP {item.yardsPerPlay}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <strong>Down + distance calls</strong>
+          <div className="table-like">
+            {situationalCallSheet.byDownDistance.filter((item) => item.plays > 0).map((item) => (
+              <div className="timeline-card" key={`${item.down}-${item.distanceBucket}`}>
+                <div className="timeline-top">
+                  <strong>
+                    Down {item.down} · {distanceBucketLabel(item.distanceBucket)}
+                  </strong>
                   <span className="mono">{item.plays} plays</span>
                 </div>
                 <div className="pill-row">
                   <span className="chip">Runs {item.runs}</span>
                   <span className="chip">Passes {item.passes}</span>
+                  <span className="chip">Other {item.other}</span>
+                  <span className="chip">Run rate {formatPercent(item.runRate)}</span>
+                  <span className="chip">Pass rate {formatPercent(item.passRate)}</span>
                   <span className="chip">Success {formatPercent(item.successRate)}</span>
                   <span className="chip">YPP {item.yardsPerPlay}</span>
+                </div>
+              </div>
+            ))}
+            {situationalCallSheet.byDownDistance.every((item) => item.plays === 0) ? (
+              <div className="kicker">No legal down-and-distance snaps are logged yet.</div>
+            ) : null}
+          </div>
+          <strong>Field zone calls</strong>
+          <div className="table-like">
+            {situationalCallSheet.byFieldZone.map((item) => (
+              <div className="timeline-card" key={item.fieldZone}>
+                <div className="timeline-top">
+                  <strong>{situationalLabel(item.fieldZone)}</strong>
+                  <span className="mono">{item.plays} plays</span>
+                </div>
+                <div className="pill-row">
+                  <span className="chip">Runs {item.runs}</span>
+                  <span className="chip">Passes {item.passes}</span>
+                  <span className="chip">Other {item.other}</span>
+                  <span className="chip">Run rate {formatPercent(item.runRate)}</span>
+                  <span className="chip">Pass rate {formatPercent(item.passRate)}</span>
+                  <span className="chip">Success {formatPercent(item.successRate)}</span>
+                  <span className="chip">YPP {item.yardsPerPlay}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="section-card pad-lg stack-md">
+          <div className="entry-header">
+            <h2 style={{ margin: 0 }}>Red-zone and goal-to-go finish</h2>
+            <span className="chip">Finishing efficiency</span>
+          </div>
+          <div className="pill-row">
+            <span className="chip">
+              Red zone {finishing.redZoneScores}/{finishing.redZoneTrips}
+            </span>
+            <span className="chip">Red zone rate {formatPercent(finishing.redZoneRate)}</span>
+            <span className="chip">
+              Goal-to-go {finishing.goalToGoScores}/{finishing.goalToGoTrips}
+            </span>
+            <span className="chip">Goal-to-go rate {formatPercent(finishing.goalToGoRate)}</span>
+          </div>
+          <div className="table-like">
+            {finishing.players.length === 0 ? <div className="kicker">No tracked red-zone player touches yet.</div> : null}
+            {finishing.players.map((player) => (
+              <div className="timeline-card" key={player.id}>
+                <div className="timeline-top">
+                  <strong>{player.label}</strong>
+                  <span className="mono">{player.redZoneTouches} red-zone touches</span>
+                </div>
+                <div className="pill-row">
+                  <span className="chip">Goal-to-go touches {player.goalToGoTouches}</span>
+                  <span className="chip">Red-zone scores {player.redZoneScores}</span>
                 </div>
               </div>
             ))}
