@@ -552,6 +552,33 @@ export const pilotTeamSettings = pgTable(
   })
 );
 
+export const pilotTeamSettingAudits = pgTable(
+  "pilot_team_setting_audits",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    key: pilotSettingKeyEnum("key").notNull(),
+    previousEnabled: boolean("previous_enabled"),
+    nextEnabled: boolean("next_enabled").notNull(),
+    changedByUserId: uuid("changed_by_user_id").references(() => appUsers.id),
+    changedAt: timestamp("changed_at", { withTimezone: true }).defaultNow().notNull()
+  },
+  (table) => ({
+    teamChangedIdx: index("pilot_team_setting_audits_team_changed_idx").on(table.teamId, table.changedAt),
+    orgTeamKeyChangedIdx: index("pilot_team_setting_audits_org_team_key_changed_idx").on(
+      table.organizationId,
+      table.teamId,
+      table.key,
+      table.changedAt
+    )
+  })
+);
+
 export const gameScoreCorrections = pgTable(
   "game_score_corrections",
   {

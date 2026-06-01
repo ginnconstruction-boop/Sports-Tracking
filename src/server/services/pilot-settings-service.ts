@@ -8,7 +8,7 @@ import {
 } from "@/lib/domain/pilot-settings";
 import { requireOrganizationRole } from "@/server/auth/context";
 import { getDb } from "@/server/db/client";
-import { pilotTeamSettings, teams } from "@/server/db/schema";
+import { pilotTeamSettingAudits, pilotTeamSettings, teams } from "@/server/db/schema";
 
 type PilotSettingsScope = {
   organizationId: string;
@@ -42,6 +42,10 @@ function mapRecord(
   };
 }
 
+export function shouldCreatePilotSettingAudit(previousEnabled: boolean | null, nextEnabled: boolean) {
+  return previousEnabled === null || previousEnabled !== nextEnabled;
+}
+
 export async function listPilotSettingsForTeam(scope: PilotSettingsScope) {
   assertFeatureEnabled("pilot_settings_server_sync");
   await requireOrganizationRole(scope.organizationId, "read_only");
@@ -69,28 +73,52 @@ export async function upsertPilotSetting(input: UpsertPilotSettingInput) {
   await assertTeamInOrganization(input);
 
   const db = getDb();
-  const [record] = await db
-    .insert(pilotTeamSettings)
-    .values({
-      organizationId: input.organizationId,
-      teamId: input.teamId,
-      key: input.key,
-      enabled: input.enabled,
-      updatedByUserId: user.id
-    })
-    .onConflictDoUpdate({
-      target: [pilotTeamSettings.organizationId, pilotTeamSettings.teamId, pilotTeamSettings.key],
-      set: {
-        enabled: input.enabled,
-        updatedByUserId: user.id,
-        updatedAt: new Date()
-      }
-    })
-    .returning();
+  const record = await db.transaction(async (tx) => {
+    const existing = await tx.query.pilotTeamSettings.findFirst({
+      where: and(
+        eq(pilotTeamSettings.organizationId, input.organizationId),
+        eq(pilotTeamSettings.teamId, input.teamId),
+        eq(pilotTeamSettings.key, input.key)
+      )
+    });
 
-  if (!record) {
-    throw new Error("Unable to persist pilot setting.");
-  }
+    const [nextRecord] = await tx
+      .insert(pilotTeamSettings)
+      .values({
+        organizationId: input.organizationId,
+        teamId: input.teamId,
+        key: input.key,
+        enabled: input.enabled,
+        updatedByUserId: user.id
+      })
+      .onConflictDoUpdate({
+        target: [pilotTeamSettings.organizationId, pilotTeamSettings.teamId, pilotTeamSettings.key],
+        set: {
+          enabled: input.enabled,
+          updatedByUserId: user.id,
+          updatedAt: new Date()
+        }
+      })
+      .returning();
+
+    if (!nextRecord) {
+      throw new Error("Unable to persist pilot setting.");
+    }
+
+    const previousEnabled = existing?.enabled ?? null;
+    if (shouldCreatePilotSettingAudit(previousEnabled, nextRecord.enabled)) {
+      await tx.insert(pilotTeamSettingAudits).values({
+        organizationId: nextRecord.organizationId,
+        teamId: nextRecord.teamId,
+        key: nextRecord.key,
+        previousEnabled,
+        nextEnabled: nextRecord.enabled,
+        changedByUserId: user.id
+      });
+    }
+
+    return nextRecord;
+  });
 
   return {
     organizationId: record.organizationId,
