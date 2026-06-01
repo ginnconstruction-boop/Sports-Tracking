@@ -365,6 +365,8 @@ export default async function ReportsPage({ params }: PageProps) {
   const showPublic = isFeatureEnabled("live_public_tracker");
   const showInternalReview = isFeatureEnabled("internal_debug_tools");
   const canRequestExports = hasCapability(record.currentUserRole, "export_reports");
+  const isMiddleSchoolTeam = /middle/i.test(record.team.level);
+  const showAdvancedDefensiveDetail = !isMiddleSchoolTeam || isFeatureEnabled("advanced_participant_capture");
   const coachNotes = staffNotes(preview);
   const primarySide = record.game.homeAway;
   const coachInsights = topCoachInsights(preview, primarySide);
@@ -801,7 +803,20 @@ export default async function ReportsPage({ params }: PageProps) {
               3rd-down allowed {defense.thirdDownAllowed}/{defense.thirdDownAttempts}
             </span>
           </div>
+          <details>
+            <summary className="kicker">Defensive stat definitions</summary>
+            <div className="kicker">
+              Pressure proxy = sacks + QB hurries + pass breakups. Impact = sacks + TFL + hurries + (2x interceptions) + recoveries + forced fumbles.
+            </div>
+          </details>
+          {!showAdvancedDefensiveDetail ? (
+            <div className="kicker">
+              Middle school simplified mode: advanced player-impact detail is hidden by default.
+            </div>
+          ) : null}
           <div className="table-like">
+            {!showAdvancedDefensiveDetail ? null : (
+              <>
             {defense.playerLeaders.length === 0 ? <div className="kicker">No defensive impact credits logged yet.</div> : null}
             {defense.playerLeaders.map((player) => (
               <div className="timeline-card" key={player.id}>
@@ -819,6 +834,8 @@ export default async function ReportsPage({ params }: PageProps) {
                 </div>
               </div>
             ))}
+              </>
+            )}
           </div>
         </section>
 

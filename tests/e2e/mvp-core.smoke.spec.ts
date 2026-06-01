@@ -786,6 +786,22 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
       expect(initialReports.status).toBe(200);
       expect(initialReports.body.preview).toBeTruthy();
       expect(Array.isArray(initialReports.body.exports)).toBeTruthy();
+      const preview = initialReports.body.preview as {
+        fullTimeline?: unknown[];
+        situational?: {
+          byDownDistance?: unknown[];
+          byFieldZone?: Array<{ key?: string }>;
+        };
+      };
+      expect(Array.isArray(preview.fullTimeline)).toBeTruthy();
+      const hasSituationalBoardShape =
+        Array.isArray(preview.situational?.byDownDistance) &&
+        Array.isArray(preview.situational?.byFieldZone);
+      if (hasSituationalBoardShape) {
+        const zoneKeys = new Set((preview.situational?.byFieldZone ?? []).map((item) => item.key));
+        expect(zoneKeys.has("red_zone")).toBeTruthy();
+        expect(zoneKeys.has("goal_to_go")).toBeTruthy();
+      }
 
       const pdfExport = await browserJson<{
         error?: unknown;

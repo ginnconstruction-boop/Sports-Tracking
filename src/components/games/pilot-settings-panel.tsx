@@ -17,21 +17,49 @@ export function PilotSettingsPanel({ statusText, onStatusChange, scope }: Props)
   const scopedStorageEnabled = isFeatureEnabled("pilot_settings_scoped_storage");
   const serverSyncEnabled = isFeatureEnabled("pilot_settings_server_sync");
 
+  async function syncPilotSetting(
+    key: "minimal_mode" | "required_fields_only" | "coach_ready_shortcuts",
+    enabled: boolean
+  ) {
+    if (!serverSyncEnabled || !scope?.organizationId || !scope?.teamId) {
+      return false;
+    }
+
+    try {
+      const response = await fetch("/api/v1/pilot-settings", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          organizationId: scope.organizationId,
+          teamId: scope.teamId,
+          key,
+          enabled
+        })
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
   useEffect(() => {
     setMinimalMode(readPilotSetting("minimal_mode", true, scope));
     setRequiredFieldsOnly(readPilotSetting("required_fields_only", true, scope));
     setCoachReadyShortcuts(readPilotSetting("coach_ready_shortcuts", true, scope));
   }, [scope]);
 
-  function updateSetting(
+  async function updateSetting(
     key: "minimal_mode" | "required_fields_only" | "coach_ready_shortcuts",
     nextValue: boolean
   ) {
     writePilotSetting(key, nextValue, scope);
+    const serverSynced = await syncPilotSetting(key, nextValue);
     const modeLabel = scopedStorageEnabled && scope?.organizationId && scope?.teamId
       ? "Pilot settings saved for this team on this device."
       : "Pilot settings saved on this device.";
-    onStatusChange?.(modeLabel);
+    onStatusChange?.(serverSynced ? `${modeLabel} Synced to server.` : modeLabel);
   }
 
   return (
@@ -57,12 +85,12 @@ export function PilotSettingsPanel({ statusText, onStatusChange, scope }: Props)
           <input
             type="checkbox"
             checked={minimalMode}
-            onChange={(event) => {
-              const nextValue = event.target.checked;
-              setMinimalMode(nextValue);
-              updateSetting("minimal_mode", nextValue);
-            }}
-          />
+              onChange={(event) => {
+                const nextValue = event.target.checked;
+                setMinimalMode(nextValue);
+                void updateSetting("minimal_mode", nextValue);
+              }}
+            />
           <div>
             <strong>Minimal mode</strong>
             <div className="kicker">Hide nonessential controls in Game Day and Live Entry.</div>
@@ -73,12 +101,12 @@ export function PilotSettingsPanel({ statusText, onStatusChange, scope }: Props)
           <input
             type="checkbox"
             checked={requiredFieldsOnly}
-            onChange={(event) => {
-              const nextValue = event.target.checked;
-              setRequiredFieldsOnly(nextValue);
-              updateSetting("required_fields_only", nextValue);
-            }}
-          />
+              onChange={(event) => {
+                const nextValue = event.target.checked;
+                setRequiredFieldsOnly(nextValue);
+                void updateSetting("required_fields_only", nextValue);
+              }}
+            />
           <div>
             <strong>Required fields only</strong>
             <div className="kicker">Default play entry to required inputs; optional fields stay collapsed.</div>
@@ -89,12 +117,12 @@ export function PilotSettingsPanel({ statusText, onStatusChange, scope }: Props)
           <input
             type="checkbox"
             checked={coachReadyShortcuts}
-            onChange={(event) => {
-              const nextValue = event.target.checked;
-              setCoachReadyShortcuts(nextValue);
-              updateSetting("coach_ready_shortcuts", nextValue);
-            }}
-          />
+              onChange={(event) => {
+                const nextValue = event.target.checked;
+                setCoachReadyShortcuts(nextValue);
+                void updateSetting("coach_ready_shortcuts", nextValue);
+              }}
+            />
           <div>
             <strong>Coach-ready shortcuts</strong>
             <div className="kicker">Show quick actions like coach-ready PDF export.</div>
