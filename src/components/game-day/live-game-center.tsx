@@ -18,6 +18,12 @@ type GameSessionSummary = {
   writerLeaseExpiresAt?: string | null;
 };
 
+type EffectivePilotSettings = {
+  minimalMode: boolean;
+  requiredFieldsOnly: boolean;
+  coachReadyShortcuts: boolean;
+};
+
 type Props = {
   gameId: string;
   record: GameAdminRecord;
@@ -199,6 +205,32 @@ function formatWriterLeaseExpiry(value?: string | null) {
   }
 
   return liveLeaseFormatter.format(new Date(value));
+}
+
+function EffectiveSettingsCard({
+  settings,
+  testId = "game-day-effective-settings"
+}: {
+  settings: EffectivePilotSettings;
+  testId?: string;
+}) {
+  return (
+    <section className="section-card stack-sm" data-testid={testId}>
+      <div className="entry-header">
+        <strong>Effective pilot settings</strong>
+        <span className="chip">Read only</span>
+      </div>
+      <div className="status-strip">
+        <span className="status-pill">Minimal mode: {settings.minimalMode ? "On" : "Off"}</span>
+        <span className="status-pill">
+          Required fields only: {settings.requiredFieldsOnly ? "On" : "Off"}
+        </span>
+        <span className="status-pill">
+          Coach-ready shortcuts: {settings.coachReadyShortcuts ? "On" : "Off"}
+        </span>
+      </div>
+    </section>
+  );
 }
 
 function formatCorrectionSituation(correction: GameStateCorrection) {
@@ -591,12 +623,17 @@ function LivePrimaryControlStrip({
   const [handoffOpen, setHandoffOpen] = useState(false);
   const [handoffOperatorLabel, setHandoffOperatorLabel] = useState("");
   const minimalModeDefault = isFeatureEnabled("game_day_minimal_mode");
+  const requiredFieldsOnlyDefault = isFeatureEnabled("required_fields_only_entry");
   const [minimalMode, setMinimalMode] = useState(minimalModeDefault);
+  const [requiredFieldsOnly, setRequiredFieldsOnly] = useState(requiredFieldsOnlyDefault);
+  const [coachReadyShortcuts, setCoachReadyShortcuts] = useState(true);
   const canOpenRecover = Boolean(latestPlay && session?.isActiveWriter && !isOffline && hasDeviceKey);
 
   useEffect(() => {
     setMinimalMode(readPilotSetting("minimal_mode", minimalModeDefault));
-  }, [minimalModeDefault]);
+    setRequiredFieldsOnly(readPilotSetting("required_fields_only", requiredFieldsOnlyDefault));
+    setCoachReadyShortcuts(readPilotSetting("coach_ready_shortcuts", true));
+  }, [minimalModeDefault, requiredFieldsOnlyDefault]);
 
   function openRecoverPanel() {
     if (!latestPlay) {
@@ -691,6 +728,13 @@ function LivePrimaryControlStrip({
           <strong>{statusText}</strong>
           {errorText ? <div className="error-note">{errorText}</div> : null}
         </div>
+        <EffectiveSettingsCard
+          settings={{
+            minimalMode,
+            requiredFieldsOnly,
+            coachReadyShortcuts
+          }}
+        />
       </div>
       <div className="live-control-actions">
         {isWriterMode ? (
@@ -1389,12 +1433,17 @@ export function LiveEntryCenter({
   const canOpenRecover = Boolean(latestPlay && isWriterMode && !isOffline && hasDeviceKey);
   const canOpenScoreEditor = Boolean(isWriterMode && !isOffline && hasDeviceKey);
   const minimalModeDefault = isFeatureEnabled("game_day_minimal_mode");
+  const requiredFieldsOnlyDefault = isFeatureEnabled("required_fields_only_entry");
   const [minimalMode, setMinimalMode] = useState(minimalModeDefault);
+  const [requiredFieldsOnly, setRequiredFieldsOnly] = useState(requiredFieldsOnlyDefault);
+  const [coachReadyShortcuts, setCoachReadyShortcuts] = useState(true);
   const activeScoreAudits = scoreCorrections.slice(0, 3);
 
   useEffect(() => {
     setMinimalMode(readPilotSetting("minimal_mode", minimalModeDefault));
-  }, [minimalModeDefault]);
+    setRequiredFieldsOnly(readPilotSetting("required_fields_only", requiredFieldsOnlyDefault));
+    setCoachReadyShortcuts(readPilotSetting("coach_ready_shortcuts", true));
+  }, [minimalModeDefault, requiredFieldsOnlyDefault]);
 
   useEffect(() => {
     const previous = previousScore.current;
@@ -1638,6 +1687,15 @@ export function LiveEntryCenter({
           onEditScoringPlay={canOpenScoreEditor ? openScoreEditor : undefined}
           canEditScore={canOpenScoreEditor}
           showWriterEditHints={isWriterMode}
+        />
+
+        <EffectiveSettingsCard
+          settings={{
+            minimalMode,
+            requiredFieldsOnly,
+            coachReadyShortcuts
+          }}
+          testId="live-entry-effective-settings"
         />
 
         <section className="live-entry-state-actions">
