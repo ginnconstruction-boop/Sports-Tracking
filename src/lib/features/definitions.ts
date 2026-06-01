@@ -100,6 +100,16 @@ export const featureDefinitions = {
     description: "Hide optional play-entry fields unless operators explicitly expand them.",
     category: "production_enabled"
   },
+  pilot_settings_scoped_storage: {
+    label: "Pilot settings scoped storage",
+    description: "Store pilot UI preferences by organization/team scope with safe fallback.",
+    category: "production_enabled"
+  },
+  pilot_settings_server_sync: {
+    label: "Pilot settings server sync",
+    description: "Future server-backed pilot settings persistence (disabled by default).",
+    category: "experimental"
+  },
   offline_outbox_sync: {
     label: "Offline outbox sync",
     description: "Enable local-first queued sync for live game mutations.",

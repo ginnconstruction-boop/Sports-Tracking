@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { getEnabledExportFormats } from "@/lib/features/runtime";
 import type { ExportFormat } from "@/lib/domain/reports";
-import { readPilotSetting } from "@/lib/pilot-settings/client";
+import { readPilotSetting, type PilotSettingsScope } from "@/lib/pilot-settings/client";
 
 type ExportJob = {
   id: string;
@@ -21,6 +21,7 @@ type Props = {
   gameId: string;
   initialExports: ExportJob[];
   canRequestExports?: boolean;
+  scope?: PilotSettingsScope;
 };
 
 type ReportsGetResponse = {
@@ -103,7 +104,7 @@ function exportFailureSuggestion(message?: string | null) {
   return "Retry the export. If it fails again, capture this message and run setup health diagnostics.";
 }
 
-export function ReportExportPanel({ gameId, initialExports, canRequestExports = true }: Props) {
+export function ReportExportPanel({ gameId, initialExports, canRequestExports = true, scope }: Props) {
   const exportFormats = getEnabledExportFormats().filter(
     (format): format is Extract<ExportFormat, "pdf" | "xlsx"> => format === "pdf" || format === "xlsx"
   );
@@ -113,8 +114,8 @@ export function ReportExportPanel({ gameId, initialExports, canRequestExports = 
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
-    setShowCoachReadyShortcut(readPilotSetting("coach_ready_shortcuts", true));
-  }, []);
+    setShowCoachReadyShortcut(readPilotSetting("coach_ready_shortcuts", true, scope));
+  }, [scope]);
 
   async function refreshExports() {
     try {

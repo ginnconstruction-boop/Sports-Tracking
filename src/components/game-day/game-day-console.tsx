@@ -13,6 +13,7 @@ import { parseClockToSeconds } from "@/lib/engine/clock";
 import { rebuildFromPlayLog } from "@/lib/engine/rebuild";
 import { compareSequence } from "@/lib/engine/sequence";
 import { mergeOutboxMutations, type OutboxMutation } from "@/lib/offline/outbox";
+import { setPilotSettingsScope } from "@/lib/pilot-settings/client";
 import {
   getOfflineGameCache,
   getOfflineSession,
@@ -292,6 +293,17 @@ export function GameDayConsole({ gameId, record, initialSnapshot, surface = "ove
   const [lastGoodSnapshot, setLastGoodSnapshot] = useState<GameDaySnapshot | null>(initialSnapshot);
   const [lastGoodPlayLog, setLastGoodPlayLog] = useState<PlayRecord[]>([]);
   const [entryLockOverride, setEntryLockOverride] = useState(false);
+
+  useEffect(() => {
+    setPilotSettingsScope({
+      organizationId: record.organizationId,
+      teamId: record.team.id
+    });
+
+    return () => {
+      setPilotSettingsScope(undefined);
+    };
+  }, [record.organizationId, record.team.id]);
 
   function captureClientIssue(event: string, error: unknown, context: Record<string, unknown> = {}) {
     const details =

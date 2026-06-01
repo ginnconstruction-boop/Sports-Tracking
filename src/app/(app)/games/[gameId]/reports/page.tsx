@@ -220,6 +220,68 @@ function redZoneFinishing(
   };
 }
 
+function defensiveOutcomes(
+  preview: Awaited<ReturnType<typeof getGameReportPreview>>,
+  primarySide: "home" | "away"
+) {
+  const totals = preview.teamStats.find((team) => team.side === primarySide)?.totals ?? {};
+  const opponentSide = primarySide === "home" ? "away" : "home";
+  const opponentTotals = preview.teamStats.find((team) => team.side === opponentSide)?.totals ?? {};
+  const thirdDownAllowed = statTotal(opponentTotals, "third_down_conversion");
+  const thirdDownAttempts = statTotal(opponentTotals, "third_down_attempt");
+  const pressureProxy =
+    statTotal(totals, "sack") + statTotal(totals, "qb_hurry") + statTotal(totals, "pass_breakup");
+  const takeaways =
+    statTotal(totals, "turnover_gained") + statTotal(totals, "interception") + statTotal(totals, "fumble_recovery");
+
+  const playerLeaders = preview.playerStats
+    .filter((player) => player.side === primarySide)
+    .map((player) => {
+      const sacks = statTotal(player.totals, "sack");
+      const tfl = statTotal(player.totals, "tfl");
+      const hurries = statTotal(player.totals, "qb_hurry");
+      const picks = statTotal(player.totals, "interception");
+      const recoveries = statTotal(player.totals, "fumble_recovery");
+      const forced = statTotal(player.totals, "forced_fumble");
+      const impact = sacks + tfl + hurries + picks * 2 + recoveries + forced;
+
+      return {
+        id: player.gameRosterEntryId,
+        label: `${player.jerseyNumber ? `#${player.jerseyNumber} ` : ""}${player.displayName}`,
+        sacks,
+        tfl,
+        hurries,
+        picks,
+        forced,
+        recoveries,
+        impact
+      };
+    })
+    .filter((player) => player.impact > 0)
+    .sort(
+      (left, right) =>
+        right.impact - left.impact ||
+        right.sacks - left.sacks ||
+        right.tfl - left.tfl ||
+        right.hurries - left.hurries
+    )
+    .slice(0, 6);
+
+  return {
+    sacks: statTotal(totals, "sack"),
+    tfl: statTotal(totals, "tfl"),
+    hurries: statTotal(totals, "qb_hurry"),
+    passBreakups: statTotal(totals, "pass_breakup"),
+    takeaways,
+    forcedFumbles: statTotal(totals, "forced_fumble"),
+    defensiveTouchdowns: statTotal(totals, "return_touchdown"),
+    pressureProxy,
+    thirdDownAllowed,
+    thirdDownAttempts,
+    playerLeaders
+  };
+}
+
 function buildPostGameChecklist(
   preview: Awaited<ReturnType<typeof getGameReportPreview>>,
   exportCount: number
@@ -311,6 +373,7 @@ export default async function ReportsPage({ params }: PageProps) {
   const situationalCallSheet = buildSituationalCallSheet(preview.fullTimeline);
   const moneyDownCalls = buildMoneyDownCallTendency(preview.fullTimeline);
   const finishing = redZoneFinishing(preview, primarySide);
+  const defense = defensiveOutcomes(preview, primarySide);
   const scoreAuditItems = scoreCorrections.slice(0, 5);
   const opponentSnapshot = tendencyDatasets.find((dataset) => dataset.key.startsWith("opponent:")) ?? null;
   const correctionTimeline = [
@@ -718,6 +781,47 @@ export default async function ReportsPage({ params }: PageProps) {
           </div>
         </section>
 
+        <section className="section-card pad-lg stack-md">
+          <div className="entry-header">
+            <h2 style={{ margin: 0 }}>Defensive outcome summary</h2>
+            <span className="chip">Game-planning defense lens</span>
+          </div>
+          <div className="pill-row">
+            <span className="chip">Takeaways {defense.takeaways}</span>
+            <span className="chip">Sacks {defense.sacks}</span>
+            <span className="chip">TFL {defense.tfl}</span>
+            <span className="chip">QB hurries {defense.hurries}</span>
+            <span className="chip">PBU {defense.passBreakups}</span>
+            <span className="chip">Pressure proxy {defense.pressureProxy}</span>
+          </div>
+          <div className="pill-row">
+            <span className="chip">Forced fumbles {defense.forcedFumbles}</span>
+            <span className="chip">Defensive TD {defense.defensiveTouchdowns}</span>
+            <span className="chip">
+              3rd-down allowed {defense.thirdDownAllowed}/{defense.thirdDownAttempts}
+            </span>
+          </div>
+          <div className="table-like">
+            {defense.playerLeaders.length === 0 ? <div className="kicker">No defensive impact credits logged yet.</div> : null}
+            {defense.playerLeaders.map((player) => (
+              <div className="timeline-card" key={player.id}>
+                <div className="timeline-top">
+                  <strong>{player.label}</strong>
+                  <span className="chip">Impact {player.impact}</span>
+                </div>
+                <div className="pill-row">
+                  <span className="chip">Sacks {player.sacks}</span>
+                  <span className="chip">TFL {player.tfl}</span>
+                  <span className="chip">Hurries {player.hurries}</span>
+                  <span className="chip">Picks {player.picks}</span>
+                  <span className="chip">Forced {player.forced}</span>
+                  <span className="chip">Recoveries {player.recoveries}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
         <TendencyBreakdownPanel
           offenseLabel={offenseLabel}
           defenseLabel={defenseLabel}
@@ -744,7 +848,15 @@ export default async function ReportsPage({ params }: PageProps) {
           </div>
 
           <div className="section-card pad-lg stack-md">
-            <ReportExportPanel gameId={gameId} initialExports={exports} canRequestExports={canRequestExports} />
+            <ReportExportPanel
+              gameId={gameId}
+              initialExports={exports}
+              canRequestExports={canRequestExports}
+              scope={{
+                organizationId: record.organizationId,
+                teamId: record.team.id
+              }}
+            />
             <div className="timeline-actions">
               {showAnalytics ? (
                 <Link className="mini-button" href="/analytics">

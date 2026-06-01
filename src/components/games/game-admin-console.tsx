@@ -706,7 +706,14 @@ export function GameAdminConsole({ record, opponents, venues }: Props) {
         </div>
       </section>
 
-      <PilotSettingsPanel statusText={statusText} onStatusChange={(message) => setStatusText(message)} />
+      <PilotSettingsPanel
+        statusText={statusText}
+        onStatusChange={(message) => setStatusText(message)}
+        scope={{
+          organizationId: adminRecord.organizationId,
+          teamId: adminRecord.team.id
+        }}
+      />
     </section>
   );
 }
