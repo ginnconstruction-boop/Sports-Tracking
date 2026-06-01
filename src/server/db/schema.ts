@@ -40,6 +40,11 @@ export const gameSessionStatusEnum = pgEnum("game_session_status", [
   "synced",
   "conflict"
 ]);
+export const pilotSettingKeyEnum = pgEnum("pilot_setting_key", [
+  "minimal_mode",
+  "required_fields_only",
+  "coach_ready_shortcuts"
+]);
 
 export const playTypeEnum = pgEnum("play_type", [
   "run",
@@ -524,6 +529,26 @@ export const gameStateCorrections = pgTable(
   (table) => ({
     gameSequenceIdx: index("game_state_corrections_game_sequence_idx").on(table.gameId, table.appliesAfterSequence),
     gameCreatedIdx: index("game_state_corrections_game_created_idx").on(table.gameId, table.createdAt)
+  })
+);
+
+export const pilotTeamSettings = pgTable(
+  "pilot_team_settings",
+  {
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    key: pilotSettingKeyEnum("key").notNull(),
+    enabled: boolean("enabled").default(true).notNull(),
+    updatedByUserId: uuid("updated_by_user_id").references(() => appUsers.id),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.organizationId, table.teamId, table.key] }),
+    teamIdx: index("pilot_team_settings_team_idx").on(table.teamId)
   })
 );
 

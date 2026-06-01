@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { isFeatureEnabled } from "@/lib/features/runtime";
 import { readPilotSetting, writePilotSetting, type PilotSettingsScope } from "@/lib/pilot-settings/client";
+import type { PilotSettingKey } from "@/lib/domain/pilot-settings";
 
 type Props = {
   statusText?: string;
@@ -17,10 +18,7 @@ export function PilotSettingsPanel({ statusText, onStatusChange, scope }: Props)
   const scopedStorageEnabled = isFeatureEnabled("pilot_settings_scoped_storage");
   const serverSyncEnabled = isFeatureEnabled("pilot_settings_server_sync");
 
-  async function syncPilotSetting(
-    key: "minimal_mode" | "required_fields_only" | "coach_ready_shortcuts",
-    enabled: boolean
-  ) {
+  async function syncPilotSetting(key: PilotSettingKey, enabled: boolean) {
     if (!serverSyncEnabled || !scope?.organizationId || !scope?.teamId) {
       return false;
     }
@@ -48,12 +46,56 @@ export function PilotSettingsPanel({ statusText, onStatusChange, scope }: Props)
     setMinimalMode(readPilotSetting("minimal_mode", true, scope));
     setRequiredFieldsOnly(readPilotSetting("required_fields_only", true, scope));
     setCoachReadyShortcuts(readPilotSetting("coach_ready_shortcuts", true, scope));
-  }, [scope]);
+    const organizationId = scope?.organizationId;
+    const teamId = scope?.teamId;
 
-  async function updateSetting(
-    key: "minimal_mode" | "required_fields_only" | "coach_ready_shortcuts",
-    nextValue: boolean
-  ) {
+    if (!serverSyncEnabled || !organizationId || !teamId) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    void (async () => {
+      try {
+        const params = new URLSearchParams({
+          organizationId,
+          teamId
+        });
+        const response = await fetch(`/api/v1/pilot-settings?${params.toString()}`, {
+          method: "GET",
+          cache: "no-store",
+          signal: controller.signal
+        });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = (await response.json()) as {
+          item?: { items?: Array<{ key: PilotSettingKey; enabled: boolean }> };
+        };
+        const items = payload.item?.items ?? [];
+
+        for (const item of items) {
+          writePilotSetting(item.key, item.enabled, scope);
+        }
+
+        const byKey = new Map(items.map((item) => [item.key, item.enabled]));
+        setMinimalMode(byKey.get("minimal_mode") ?? true);
+        setRequiredFieldsOnly(byKey.get("required_fields_only") ?? true);
+        setCoachReadyShortcuts(byKey.get("coach_ready_shortcuts") ?? true);
+        onStatusChange?.("Pilot settings loaded for this team.");
+      } catch {
+        // Keep local scoped values as the fallback source of truth when sync is unavailable.
+      }
+    })();
+
+    return () => {
+      controller.abort();
+    };
+  }, [scope, serverSyncEnabled, onStatusChange]);
+
+  async function updateSetting(key: PilotSettingKey, nextValue: boolean) {
     writePilotSetting(key, nextValue, scope);
     const serverSynced = await syncPilotSetting(key, nextValue);
     const modeLabel = scopedStorageEnabled && scope?.organizationId && scope?.teamId

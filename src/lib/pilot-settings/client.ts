@@ -1,11 +1,7 @@
 "use client";
 
 import { isFeatureEnabled } from "@/lib/features/runtime";
-
-export type PilotSettingKey =
-  | "minimal_mode"
-  | "required_fields_only"
-  | "coach_ready_shortcuts";
+import type { PilotSettingKey } from "@/lib/domain/pilot-settings";
 
 export type PilotSettingsScope = {
   organizationId?: string;
