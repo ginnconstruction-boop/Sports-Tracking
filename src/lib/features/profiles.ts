@@ -89,18 +89,18 @@ export const launchProfiles: Record<LaunchProfileName, FeatureProfile> = {
     game_day_minimal_mode: true,
     required_fields_only_entry: true,
     pilot_settings_scoped_storage: true,
-    pilot_settings_server_sync: false,
+    pilot_settings_server_sync: true,
     csv_export: false,
     json_export: false,
-    xlsx_export: false,
-    pdf_export: false,
+    xlsx_export: true,
+    pdf_export: true,
     drive_summary: false,
     advanced_participant_capture: false,
     live_public_tracker: false,
     parent_portal: false,
     advanced_analytics: false,
     voice_input: false,
-    organization_branding: false,
+    organization_branding: true,
     internal_debug_tools: false
   }
 };

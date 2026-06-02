@@ -122,6 +122,61 @@ export async function listPilotSettingAuditHistory(input: ListPilotSettingAuditH
   };
 }
 
+export async function resetPilotSettingsForTeam(scope: PilotSettingsScope) {
+  assertFeatureEnabled("pilot_settings_server_sync");
+  const { user } = await requireOrganizationRole(scope.organizationId, "head_coach");
+  await assertTeamInOrganization(scope);
+
+  const db = getDb();
+  await db.transaction(async (tx) => {
+    const existing = await tx.query.pilotTeamSettings.findMany({
+      where: and(
+        eq(pilotTeamSettings.organizationId, scope.organizationId),
+        eq(pilotTeamSettings.teamId, scope.teamId)
+      )
+    });
+
+    const existingByKey = new Map(existing.map((record) => [record.key as PilotSettingKey, record]));
+    const auditRows = pilotSettingKeys
+      .map((key) => {
+        const previousEnabled = existingByKey.get(key)?.enabled ?? pilotSettingDefaults[key];
+        const nextEnabled = pilotSettingDefaults[key];
+        if (!shouldCreatePilotSettingAudit(previousEnabled, nextEnabled)) {
+          return null;
+        }
+
+        return {
+          organizationId: scope.organizationId,
+          teamId: scope.teamId,
+          key,
+          previousEnabled,
+          nextEnabled,
+          changedByUserId: user.id
+        };
+      })
+      .filter((row): row is NonNullable<typeof row> => row !== null);
+
+    await tx
+      .delete(pilotTeamSettings)
+      .where(
+        and(
+          eq(pilotTeamSettings.organizationId, scope.organizationId),
+          eq(pilotTeamSettings.teamId, scope.teamId)
+        )
+      );
+
+    if (auditRows.length > 0) {
+      await tx.insert(pilotTeamSettingAudits).values(auditRows);
+    }
+  });
+
+  return {
+    organizationId: scope.organizationId,
+    teamId: scope.teamId,
+    items: pilotSettingKeys.map((key) => mapRecord(key))
+  };
+}
+
 export async function upsertPilotSetting(input: UpsertPilotSettingInput) {
   assertFeatureEnabled("pilot_settings_server_sync");
   const { user } = await requireOrganizationRole(input.organizationId, "assistant_coach");

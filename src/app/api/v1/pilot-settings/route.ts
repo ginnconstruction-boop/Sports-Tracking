@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { pilotSettingKeys } from "@/lib/domain/pilot-settings";
-import { FeatureDisabledError } from "@/lib/features/server";
 import { listPilotSettingsForTeam, upsertPilotSetting } from "@/server/services/pilot-settings-service";
+import { pilotSettingsErrorResponse } from "@/app/api/v1/pilot-settings/route-helpers";
 
 const pilotSettingsPayloadSchema = z.object({
   organizationId: z.string().uuid(),
@@ -29,10 +29,7 @@ export async function GET(request: NextRequest) {
     const item = await listPilotSettingsForTeam(parsed.data);
     return NextResponse.json({ item });
   } catch (error) {
-    if (error instanceof FeatureDisabledError) {
-      return NextResponse.json({ error: "Pilot settings sync is disabled." }, { status: 404 });
-    }
-    return NextResponse.json({ error: "Pilot settings sync is unavailable." }, { status: 500 });
+    return pilotSettingsErrorResponse(error, "Pilot settings sync is unavailable.");
   }
 }
 
@@ -47,9 +44,6 @@ export async function POST(request: NextRequest) {
     const item = await upsertPilotSetting(parsed.data);
     return NextResponse.json({ item }, { status: 200 });
   } catch (error) {
-    if (error instanceof FeatureDisabledError) {
-      return NextResponse.json({ error: "Pilot settings sync is disabled." }, { status: 404 });
-    }
-    return NextResponse.json({ error: "Pilot settings sync is unavailable." }, { status: 500 });
+    return pilotSettingsErrorResponse(error, "Pilot settings sync is unavailable.");
   }
 }

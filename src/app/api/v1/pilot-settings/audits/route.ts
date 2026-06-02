@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { FeatureDisabledError } from "@/lib/features/server";
 import { listPilotSettingAuditHistory } from "@/server/services/pilot-settings-service";
+import { pilotSettingsErrorResponse } from "@/app/api/v1/pilot-settings/route-helpers";
 
 const pilotSettingsAuditQuerySchema = z.object({
   organizationId: z.string().uuid(),
@@ -24,10 +24,6 @@ export async function GET(request: NextRequest) {
     const item = await listPilotSettingAuditHistory(parsed.data);
     return NextResponse.json({ item });
   } catch (error) {
-    if (error instanceof FeatureDisabledError) {
-      return NextResponse.json({ error: "Pilot settings sync is disabled." }, { status: 404 });
-    }
-
-    return NextResponse.json({ error: "Pilot settings audit history is unavailable." }, { status: 500 });
+    return pilotSettingsErrorResponse(error, "Pilot settings audit history is unavailable.");
   }
 }

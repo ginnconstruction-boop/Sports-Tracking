@@ -51,17 +51,17 @@ test("pilot core launch profile keeps optional features off by default", () => {
   assert.equal(pilot.game_day_minimal_mode, true);
   assert.equal(pilot.required_fields_only_entry, true);
   assert.equal(pilot.pilot_settings_scoped_storage, true);
-  assert.equal(pilot.pilot_settings_server_sync, false);
+  assert.equal(pilot.pilot_settings_server_sync, true);
 
   assert.equal(pilot.csv_export, false);
   assert.equal(pilot.json_export, false);
-  assert.equal(pilot.xlsx_export, false);
-  assert.equal(pilot.pdf_export, false);
+  assert.equal(pilot.xlsx_export, true);
+  assert.equal(pilot.pdf_export, true);
   assert.equal(pilot.drive_summary, false);
   assert.equal(pilot.advanced_participant_capture, false);
   assert.equal(pilot.live_public_tracker, false);
   assert.equal(pilot.advanced_analytics, false);
-  assert.equal(pilot.organization_branding, false);
+  assert.equal(pilot.organization_branding, true);
   assert.equal(pilot.internal_debug_tools, false);
 });
 

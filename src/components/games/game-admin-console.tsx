@@ -713,6 +713,7 @@ export function GameAdminConsole({ record, opponents, venues }: Props) {
           organizationId: adminRecord.organizationId,
           teamId: adminRecord.team.id
         }}
+        canResetTeamSettings={canManageGames}
       />
     </section>
   );
