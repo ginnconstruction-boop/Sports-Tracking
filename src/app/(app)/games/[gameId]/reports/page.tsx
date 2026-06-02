@@ -346,6 +346,40 @@ function reportCompleteness(preview: Awaited<ReturnType<typeof getGameReportPrev
   };
 }
 
+function coachReadyLaunchSet(
+  preview: Awaited<ReturnType<typeof getGameReportPreview>>,
+  exports: Awaited<ReturnType<typeof listGameExports>>
+) {
+  const exportFormats = [...new Set(exports.map((item) => item.format.toUpperCase()))];
+
+  return [
+    {
+      label: "Game summary",
+      detail: `${preview.finalSummary.totalPlays} plays, ${preview.finalSummary.totalDrives} drives, and ${preview.scoringSummary.length} scoring events.`
+    },
+    {
+      label: "Full play timeline",
+      detail: `${preview.fullTimeline.length} ordered entries driven directly from the canonical play log.`
+    },
+    {
+      label: "Money down report",
+      detail: "3rd and 4th down call mix, conversion rate, and yards per play."
+    },
+    {
+      label: "Situational call sheet",
+      detail: "Down-and-distance and field-zone run/pass tendencies for game planning."
+    },
+    {
+      label: "Defensive outcomes",
+      detail: "Takeaways, sacks, pressure proxy, and defensive impact leaders."
+    },
+    {
+      label: "Coach exports",
+      detail: exportFormats.length > 0 ? `Current export jobs: ${exportFormats.join(" / ")}.` : "Launch formats: PDF / XLSX."
+    }
+  ];
+}
+
 export default async function ReportsPage({ params }: PageProps) {
   if (!isFeatureEnabled("reports_preview")) {
     notFound();
@@ -404,6 +438,7 @@ export default async function ReportsPage({ params }: PageProps) {
     record.game.homeAway === "home" ? `${preview.context.homeTeam} offense` : `${preview.context.awayTeam} offense`;
   const defenseLabel =
     record.game.homeAway === "home" ? `${preview.context.homeTeam} defense` : `${preview.context.awayTeam} defense`;
+  const launchSet = coachReadyLaunchSet(preview, exports);
 
   return (
     <AppShell
@@ -521,6 +556,27 @@ export default async function ReportsPage({ params }: PageProps) {
                 </div>
               ))}
             </div>
+          </div>
+        </section>
+
+        <section className="section-card pad-lg stack-md">
+          <div className="entry-header">
+            <h2 style={{ margin: 0 }}>Coach-ready launch set</h2>
+            <span className="chip">Pilot package</span>
+          </div>
+          <div className="kicker">
+            This is the report package currently positioned for launch: summary first, situational game-planning views next, then PDF/XLSX handoff for coaches and staff.
+          </div>
+          <div className="table-like">
+            {launchSet.map((item) => (
+              <div className="timeline-card" key={item.label}>
+                <div className="timeline-top">
+                  <strong>{item.label}</strong>
+                  <span className="mono">included</span>
+                </div>
+                <div className="kicker">{item.detail}</div>
+              </div>
+            ))}
           </div>
         </section>
 

@@ -18,6 +18,43 @@ type Props = {
   organizationId: string;
 };
 
+const defaultBrandPalette = {
+  primaryColor: "#13221b",
+  secondaryColor: "#f2eadc",
+  accentColor: "#d18d1f"
+} as const;
+
+function brandingPreviewStyle(branding: Branding) {
+  return {
+    "--brand-primary": branding.primaryColor ?? defaultBrandPalette.primaryColor,
+    "--brand-secondary": branding.secondaryColor ?? defaultBrandPalette.secondaryColor,
+    "--brand-accent": branding.accentColor ?? defaultBrandPalette.accentColor
+  } as CSSProperties;
+}
+
+function brandingReadiness(branding: Branding) {
+  return [
+    {
+      label: "Display name",
+      ready: Boolean(branding.publicDisplayName?.trim() || branding.name.trim()),
+      detail: branding.publicDisplayName?.trim() || branding.name
+    },
+    {
+      label: "Color palette",
+      ready: Boolean(branding.primaryColor && branding.secondaryColor && branding.accentColor),
+      detail:
+        branding.primaryColor && branding.secondaryColor && branding.accentColor
+          ? "Primary, secondary, and accent colors are set."
+          : "Use all three colors for cleaner report exports."
+    },
+    {
+      label: "Wordmark",
+      ready: Boolean(branding.wordmarkPath?.trim()),
+      detail: branding.wordmarkPath?.trim() || "Optional for pilot, helpful for PDF exports."
+    }
+  ];
+}
+
 async function readJson<T>(input: RequestInfo, init?: RequestInit) {
   const response = await fetch(input, {
     ...init,
@@ -46,6 +83,21 @@ export function BrandingPanel({ organizationId }: Props) {
       })
       .catch((error) => setStatus(error instanceof Error ? error.message : "Unable to load branding."));
   }, [organizationId]);
+
+  function applyRecommendedDefaults() {
+    setBranding((current) =>
+      current
+        ? {
+            ...current,
+            publicDisplayName: current.publicDisplayName?.trim() || current.name,
+            primaryColor: current.primaryColor ?? defaultBrandPalette.primaryColor,
+            secondaryColor: current.secondaryColor ?? defaultBrandPalette.secondaryColor,
+            accentColor: current.accentColor ?? defaultBrandPalette.accentColor
+          }
+        : current
+    );
+    setStatus("Recommended pilot branding applied locally.");
+  }
 
   async function save() {
     if (!branding) {
@@ -78,9 +130,9 @@ export function BrandingPanel({ organizationId }: Props) {
     <section className="section-card pad-lg stack-md">
       <div className="entry-header">
         <div>
-          <h2 style={{ margin: 0 }}>Branding and sharing</h2>
+          <h2 style={{ margin: 0 }}>Branding for pilot reports</h2>
           <p className="kicker">
-            Control the public-facing name and color palette used by reports, public links, and future branded exports.
+            Set the team name, colors, and optional wordmark used in Game Day headers and coach-ready PDF/XLSX exports.
           </p>
         </div>
         <span className="chip">{status}</span>
@@ -88,6 +140,14 @@ export function BrandingPanel({ organizationId }: Props) {
 
       {branding ? (
         <>
+          <div className="pill-row">
+            {brandingReadiness(branding).map((item) => (
+              <span className="chip" key={item.label}>
+                {item.label}: {item.ready ? "Ready" : "Needs setup"}
+              </span>
+            ))}
+          </div>
+
           <div className="form-grid">
             <label className="field">
               <span>Public display name</span>
@@ -138,25 +198,54 @@ export function BrandingPanel({ organizationId }: Props) {
               />
             </label>
           </div>
+
           <div
             className="brand-preview"
-            style={
-              {
-                "--brand-primary": branding.primaryColor ?? "#13221b",
-                "--brand-secondary": branding.secondaryColor ?? "#f2eadc",
-                "--brand-accent": branding.accentColor ?? "#d18d1f"
-              } as CSSProperties
-            }
+            style={brandingPreviewStyle(branding)}
           >
             <div className="brand-preview-inner">
               <strong>{branding.publicDisplayName || branding.name}</strong>
               <span>{branding.slug}</span>
             </div>
           </div>
+
+          <div className="report-grid">
+            <div className="timeline-card stack-sm" style={brandingPreviewStyle(branding)}>
+              <strong>Coach packet preview</strong>
+              <div className="kicker">
+                {branding.publicDisplayName || branding.name} game report header with your selected palette.
+              </div>
+              <div className="pill-row">
+                <span className="chip">PDF export</span>
+                <span className="chip">XLSX export</span>
+              </div>
+            </div>
+            <div className="timeline-card stack-sm">
+              <strong>Pilot recommendation</strong>
+              <div className="kicker">For launch, keep the display name clean, use all three colors, and add a wordmark if you already have one.</div>
+              <div className="kicker">If you do not have a wordmark yet, the rest of the branding setup is still enough for pilot use.</div>
+            </div>
+          </div>
+
           <div className="timeline-actions">
+            <button className="button-secondary-light" disabled={isBusy} type="button" onClick={applyRecommendedDefaults}>
+              Use recommended defaults
+            </button>
             <button className="button-primary" disabled={isBusy} type="button" onClick={() => void save()}>
               Save branding
             </button>
+          </div>
+
+          <div className="table-like">
+            {brandingReadiness(branding).map((item) => (
+              <div className="timeline-card" key={`readiness-${item.label}`}>
+                <div className="timeline-top">
+                  <strong>{item.label}</strong>
+                  <span className="mono">{item.ready ? "ready" : "needs setup"}</span>
+                </div>
+                <div className="kicker">{item.detail}</div>
+              </div>
+            ))}
           </div>
         </>
       ) : null}
