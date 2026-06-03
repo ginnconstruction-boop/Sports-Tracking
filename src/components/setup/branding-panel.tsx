@@ -55,6 +55,16 @@ function brandingReadiness(branding: Branding) {
   ];
 }
 
+function pilotReadyBranding(branding: Branding) {
+  const displayNameReady = Boolean(branding.publicDisplayName?.trim() || branding.name.trim());
+  const paletteReady = Boolean(branding.primaryColor && branding.secondaryColor && branding.accentColor);
+
+  return {
+    ready: displayNameReady && paletteReady,
+    label: displayNameReady && paletteReady ? "Pilot ready" : "Needs setup"
+  };
+}
+
 async function readJson<T>(input: RequestInfo, init?: RequestInit) {
   const response = await fetch(input, {
     ...init,
@@ -141,6 +151,12 @@ export function BrandingPanel({ organizationId }: Props) {
       {branding ? (
         <>
           <div className="pill-row">
+            <span className="chip">{pilotReadyBranding(branding).label}</span>
+            <span className="chip">Wordmark optional for pilot</span>
+            <span className="chip">Coach exports: PDF / XLSX</span>
+          </div>
+
+          <div className="pill-row">
             {brandingReadiness(branding).map((item) => (
               <span className="chip" key={item.label}>
                 {item.label}: {item.ready ? "Ready" : "Needs setup"}
@@ -223,7 +239,7 @@ export function BrandingPanel({ organizationId }: Props) {
             <div className="timeline-card stack-sm">
               <strong>Pilot recommendation</strong>
               <div className="kicker">For launch, keep the display name clean, use all three colors, and add a wordmark if you already have one.</div>
-              <div className="kicker">If you do not have a wordmark yet, the rest of the branding setup is still enough for pilot use.</div>
+              <div className="kicker">If you do not have a wordmark yet, the rest of the branding setup is still enough to call branding pilot ready.</div>
             </div>
           </div>
 

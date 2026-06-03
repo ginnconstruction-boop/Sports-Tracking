@@ -163,14 +163,24 @@ export function ReportExportPanel({ gameId, initialExports, canRequestExports = 
         </div>
         <div className="pill-row">
           {showCoachReadyShortcut ? (
-            <button
-              className="button-secondary button-secondary-light"
-              disabled={isPending || !canRequestExports || !exportFormats.includes("pdf")}
-              type="button"
-              onClick={() => void requestExport("pdf")}
-            >
-              Coach-ready PDF
-            </button>
+            <>
+              <button
+                className="button-secondary button-secondary-light"
+                disabled={isPending || !canRequestExports || !exportFormats.includes("pdf")}
+                type="button"
+                onClick={() => void requestExport("pdf")}
+              >
+                Coach-ready PDF
+              </button>
+              <button
+                className="button-secondary button-secondary-light"
+                disabled={isPending || !canRequestExports || !exportFormats.includes("xlsx")}
+                type="button"
+                onClick={() => void requestExport("xlsx")}
+              >
+                Coach-ready XLSX
+              </button>
+            </>
           ) : null}
           {exportFormats.map((format, index) => (
             <button
@@ -193,6 +203,7 @@ export function ReportExportPanel({ gameId, initialExports, canRequestExports = 
         <div className="chip">Canonical game report document</div>
         <div className="chip">{exportFormats.map((item) => exportFormatLabel(item)).join(" / ")}</div>
         <div className="chip">Supabase Storage artifact tracking</div>
+        <div className="chip">Coach-ready package locked</div>
       </div>
 
       {errorText ? <div className="error-note">{errorText}</div> : null}
