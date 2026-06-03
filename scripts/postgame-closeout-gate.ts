@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { loadSmokeEnvironment } from "../tests/e2e/support/smoke-config";
 
 function readArg(name: string) {
   const prefixed = process.argv.find((value) => value.startsWith(`--${name}=`));
@@ -10,6 +11,7 @@ function readArg(name: string) {
 }
 
 async function main() {
+  loadSmokeEnvironment();
   const gameId = readArg("gameId");
   if (!gameId) {
     throw new Error("Missing required --gameId.");

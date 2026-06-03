@@ -29,6 +29,8 @@ type SmokeMembership = {
 };
 
 const smoke = resolveSmokeConfig();
+const preferredGameId = process.env.SMOKE_GAME_ID?.trim() ?? "";
+const requireCloseoutReady = process.env.SMOKE_REQUIRE_CLOSEOUT_READY === "true";
 
 function toDateTimeLocalValue(date: Date) {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
@@ -220,7 +222,14 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
       await page.getByLabel("Email").fill(smoke.email);
       await page.getByLabel("Password").fill(smoke.password);
       await page.getByRole("button", { name: "Log in" }).click();
+      await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 15_000 }).catch(() => null);
       await page.waitForLoadState("networkidle");
+      if (new URL(page.url()).pathname.startsWith("/login")) {
+        const errorNote = page.locator(".error-note").first();
+        const errorText =
+          (await errorNote.isVisible().catch(() => false)) ? await errorNote.textContent() : null;
+        throw new Error(errorText?.trim() || "Login did not redirect off /login.");
+      }
       landingState = await detectLandingState(page);
       expect(landingState).not.toBe("unknown");
     });
@@ -499,7 +508,12 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
       venueName = match!.name;
     });
 
-    await runStep("create game", async () => {
+    await runStep("create/select game", async () => {
+      if (preferredGameId) {
+        gameId = preferredGameId;
+        return;
+      }
+
       if (!setupMode()) {
         const kickoff = new Date();
         kickoff.setMinutes(kickoff.getMinutes() + 90);
@@ -828,6 +842,10 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
       });
       if (pdfExport.status !== 201) {
         const message = typeof pdfExport.body.error === "string" ? pdfExport.body.error : JSON.stringify(pdfExport.body);
+        if (requireCloseoutReady) {
+          expect(pdfExport.status).toBe(201);
+          return;
+        }
         expect(pdfExport.status).toBe(500);
         expect(message).toContain("report_exports");
         return;
@@ -862,6 +880,10 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
       });
       if (xlsxExport.status !== 201) {
         const message = typeof xlsxExport.body.error === "string" ? xlsxExport.body.error : JSON.stringify(xlsxExport.body);
+        if (requireCloseoutReady) {
+          expect(xlsxExport.status).toBe(201);
+          return;
+        }
         expect(xlsxExport.status).toBe(500);
         expect(message).toContain("report_exports");
         return;
@@ -880,6 +902,25 @@ test("MVP critical path smoke", async ({ page }, testInfo) => {
       expect(xlsxBinary.contentType).toContain(
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
       );
+    });
+
+    await runStep("return game to final closeout state", async () => {
+      if (!requireCloseoutReady) {
+        return;
+      }
+
+      await page.goto(`/games/${gameId}/manage`);
+      await page.waitForLoadState("networkidle");
+
+      const statusField = page.getByLabel("Status");
+      if (await statusField.count()) {
+        await expect(statusField).toHaveValue("ready");
+      }
+
+      const markFinalButton = page.getByRole("button", { name: "Mark final + lock" });
+      await expect(markFinalButton).toBeVisible();
+      await markFinalButton.click();
+      await expect(statusField).toHaveValue("final");
     });
   } catch (error) {
     await attachDiagnostics(page, testInfo, apiEvidence, consoleErrors, currentStep);
