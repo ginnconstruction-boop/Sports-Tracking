@@ -34,6 +34,11 @@ type Props = {
   record: GameAdminRecord;
   opponents: Opponent[];
   venues: Venue[];
+  launchReadiness: {
+    exportCount: number;
+    completedExportCount: number;
+    exportFormats: string[];
+  };
 };
 
 type FormState = {
@@ -89,7 +94,82 @@ function messageFromError(error: unknown, fallback: string) {
   return fallback;
 }
 
-export function GameAdminConsole({ record, opponents, venues }: Props) {
+function buildOperatorPath(
+  record: GameAdminRecord,
+  launchReadiness: Props["launchReadiness"]
+) {
+  const gamePrepared = ["ready", "in_progress", "final", "archived"].includes(record.game.status);
+  const hasLiveData = record.game.currentRevision > 0;
+  const hasCoachPacket = launchReadiness.completedExportCount > 0;
+  const isClosedOut = ["final", "archived"].includes(record.game.status);
+
+  return [
+    {
+      label: "Roster confirmed",
+      complete: Boolean(record.game.rosterConfirmedAt),
+      detail: record.game.rosterConfirmedAt
+        ? `Confirmed ${new Date(record.game.rosterConfirmedAt).toLocaleString()}.`
+        : "Confirm the active sideline roster before kickoff so jersey mapping stays clean."
+    },
+    {
+      label: "Game admin ready",
+      complete: gamePrepared,
+      detail: gamePrepared
+        ? `Status is ${record.game.status.replaceAll("_", " ")} and the game can move into live use.`
+        : "Set the game to ready after kickoff, venue, and travel details are verified."
+    },
+    {
+      label: "Live capture started",
+      complete: hasLiveData,
+      detail: hasLiveData
+        ? `${record.game.currentRevision} play-log revisions are already on the record.`
+        : "Open Live Entry on the writer device and start capturing the canonical play log."
+    },
+    {
+      label: "Coach packet exported",
+      complete: hasCoachPacket,
+      detail: hasCoachPacket
+        ? `${launchReadiness.completedExportCount} completed export job${launchReadiness.completedExportCount === 1 ? "" : "s"} (${launchReadiness.exportFormats.join(" / ")}).`
+        : "Open reports, verify the launch set, and run PDF/XLSX exports for coaches."
+    },
+    {
+      label: "Final status locked",
+      complete: isClosedOut,
+      detail: isClosedOut
+        ? `Game status is ${record.game.status.replaceAll("_", " ")}.`
+        : "After staff approves corrections and exports, mark the game final."
+    }
+  ];
+}
+
+function recommendedNextAction(
+  record: GameAdminRecord,
+  launchReadiness: Props["launchReadiness"]
+) {
+  if (!record.game.rosterConfirmedAt) {
+    return "Confirm the game roster before the writer takes the device live.";
+  }
+
+  if (!["ready", "in_progress", "final", "archived"].includes(record.game.status)) {
+    return "Set the game to ready once the staff details are locked in.";
+  }
+
+  if (record.game.currentRevision === 0) {
+    return "Open Live Entry and start the play log from the primary writer device.";
+  }
+
+  if (launchReadiness.completedExportCount === 0) {
+    return "Open reports, review the coach-ready packet, and run PDF/XLSX exports.";
+  }
+
+  if (!["final", "archived"].includes(record.game.status)) {
+    return "Mark the game final after the staff signs off on the closeout packet.";
+  }
+
+  return "Operator flow is closed out. Archive later only if your staff wants the game moved out of the active list.";
+}
+
+export function GameAdminConsole({ record, opponents, venues, launchReadiness }: Props) {
   const showPublicTrackerControls = isFeatureEnabled("live_public_tracker");
   const [adminRecord, setAdminRecord] = useState(record);
   const [statusText, setStatusText] = useState("Game admin ready.");
@@ -131,6 +211,14 @@ export function GameAdminConsole({ record, opponents, venues }: Props) {
       .filter(Boolean)
       .join(", ");
   }, [adminRecord.venue]);
+  const operatorPath = useMemo(
+    () => buildOperatorPath(adminRecord, launchReadiness),
+    [adminRecord, launchReadiness]
+  );
+  const nextAction = useMemo(
+    () => recommendedNextAction(adminRecord, launchReadiness),
+    [adminRecord, launchReadiness]
+  );
   const undoSecondsRemaining = archiveUndoExpiresAt ? Math.max(0, Math.ceil((archiveUndoExpiresAt - nowMs) / 1000)) : 0;
 
   useEffect(() => {
@@ -625,6 +713,24 @@ export function GameAdminConsole({ record, opponents, venues }: Props) {
             <h2 style={{ margin: 0 }}>Operational view</h2>
             <span className="chip">{adminRecord.team.level}</span>
           </div>
+          <div className="kicker">Recommended next action: {nextAction}</div>
+          <div className="table-like">
+            {operatorPath.map((item) => (
+              <div className="timeline-card" key={item.label}>
+                <div className="timeline-top">
+                  <strong>{item.label}</strong>
+                  <span className="chip">{item.complete ? "complete" : "needs action"}</span>
+                </div>
+                <div className="kicker">{item.detail}</div>
+              </div>
+            ))}
+          </div>
+          <div className="timeline-actions">
+            <Link className="mini-button" href={`/games/${adminRecord.game.id}/operator-guide` as Route}>Open operator guide</Link>
+            {canWriteLivePlays ? <Link className="mini-button" href={`/games/${adminRecord.game.id}/live`}>Open live entry</Link> : null}
+            <Link className="mini-button" href={`/games/${adminRecord.game.id}/reports`}>Open reports</Link>
+          </div>
+          <h3 style={{ margin: 0 }}>Operational snapshot</h3>
           <div className="table-like">
             <div className="timeline-card">
               <div className="timeline-top">

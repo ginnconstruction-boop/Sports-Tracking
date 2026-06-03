@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { Route } from "next";
 import { useEffect, useMemo, useState } from "react";
 import { BrandingPanel } from "@/components/setup/branding-panel";
 import { gameStatusValues } from "@/lib/contracts/admin";
@@ -1614,8 +1615,14 @@ export function SetupConsole({ memberships }: Props) {
                   <Link className="mini-button" href={`/games/${item.game.id}/manage`}>
                     Game admin
                   </Link>
+                  <Link className="mini-button" href={`/games/${item.game.id}/operator-guide` as Route}>
+                    Operator guide
+                  </Link>
                   <Link className="mini-button" href={`/games/${item.game.id}/gameday`}>
                     Open Game Day
+                  </Link>
+                  <Link className="mini-button" href={`/games/${item.game.id}/live`}>
+                    Live entry
                   </Link>
                   <Link className="mini-button" href={`/games/${item.game.id}/reports`}>
                     Open reports

@@ -31,11 +31,16 @@ type VenueRow = {
   postal_code: string | null;
 };
 
+type ExportSummaryRow = {
+  status: string;
+  format: string;
+};
+
 export default async function GameManagePage({ params }: PageProps) {
   const { gameId } = await params;
   const record = await getGameAdminRecord(gameId);
   const supabaseAdmin = createSupabaseAdminClient();
-  const [opponentsResult, venuesResult] = await Promise.all([
+  const [opponentsResult, venuesResult, exportsResult] = await Promise.all([
     supabaseAdmin
       .from("opponents")
       .select("id,organization_id,school_name,mascot,short_code,archived_at")
@@ -45,7 +50,12 @@ export default async function GameManagePage({ params }: PageProps) {
       .from("venues")
       .select("id,organization_id,name,field_name,address_line_1,address_line_2,city,state,postal_code")
       .eq("organization_id", record.organizationId)
-      .returns<VenueRow[]>()
+      .returns<VenueRow[]>(),
+    supabaseAdmin
+      .from("report_exports")
+      .select("status,format")
+      .eq("game_id", gameId)
+      .returns<ExportSummaryRow[]>()
   ]);
 
   if (opponentsResult.error) {
@@ -56,8 +66,14 @@ export default async function GameManagePage({ params }: PageProps) {
     throw new Error(venuesResult.error.message);
   }
 
+  if (exportsResult.error) {
+    throw new Error(exportsResult.error.message);
+  }
+
   const opponentItems = opponentsResult.data ?? [];
   const venueItems = venuesResult.data ?? [];
+  const exportItems = exportsResult.data ?? [];
+  const completedExportItems = exportItems.filter((item) => item.status === "complete");
 
   const serializedOpponents = opponentItems.map((item) => ({
     id: item.id,
@@ -90,7 +106,16 @@ export default async function GameManagePage({ params }: PageProps) {
     >
       <section className="section-grid">
         <GameContextHeader record={record} />
-        <GameAdminConsole record={record} opponents={serializedOpponents} venues={serializedVenues} />
+        <GameAdminConsole
+          record={record}
+          opponents={serializedOpponents}
+          venues={serializedVenues}
+          launchReadiness={{
+            exportCount: exportItems.length,
+            completedExportCount: completedExportItems.length,
+            exportFormats: [...new Set(completedExportItems.map((item) => item.format.toUpperCase()))]
+          }}
+        />
       </section>
     </AppShell>
   );

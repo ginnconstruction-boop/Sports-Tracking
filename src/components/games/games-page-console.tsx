@@ -503,7 +503,7 @@ export function GamesPageConsole() {
                             {item.venueName ? [item.venueName, item.venueCity, item.venueState].filter(Boolean).join(", ") : "Venue TBD"}
                           </div>
                           <div className="timeline-actions">
-                            <Link className="button-primary-small button-primary" href={`/games/${item.game.id}/manage`}>
+                            <Link className="button-primary-small button-primary" href={`/games/${item.game.id}/manage`} prefetch={false}>
                               Open game
                             </Link>
                           </div>

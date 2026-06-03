@@ -48,10 +48,24 @@ export default async function OperatorGuidePage({ params }: PageProps) {
             <h2 style={{ margin: 0 }}>Post-game closeout</h2>
             <div className="table-like">
               <div className="timeline-card"><strong>1. Final pass on recent plays</strong><div className="kicker">Check quarter transitions, turnovers, and scoring sequence.</div></div>
-              <div className="timeline-card"><strong>2. Open reports and verify totals</strong><div className="kicker">Review coach packet summary and tendency board before export.</div></div>
-              <div className="timeline-card"><strong>3. Archive game</strong><div className="kicker">Archive once staff confirms final corrections and report readiness.</div></div>
+              <div className="timeline-card"><strong>2. Open reports and verify totals</strong><div className="kicker">Review the coach-ready launch set, then run PDF/XLSX exports before staff handoff.</div></div>
+              <div className="timeline-card"><strong>3. Mark final in Game Admin</strong><div className="kicker">Lock final status after the staff signs off on corrections and exports. Archive later if you want it out of the active list.</div></div>
             </div>
           </section>
+        </section>
+
+        <section className="section-card pad-lg stack-md">
+          <div className="entry-header">
+            <h2 style={{ margin: 0 }}>Preferred pilot flow</h2>
+            <span className="chip">One operator path</span>
+          </div>
+          <div className="table-like">
+            <div className="timeline-card"><strong>1. Setup and roster</strong><div className="kicker">Confirm the game, roster, and kickoff details in Setup and Game Admin first.</div></div>
+            <div className="timeline-card"><strong>2. Single writer device</strong><div className="kicker">Use one primary Live Entry device so the play log stays clean and the writer lease stays predictable.</div></div>
+            <div className="timeline-card"><strong>3. Corrections only when needed</strong><div className="kicker">Use play edits first, then situation or score corrections only when the game must keep moving.</div></div>
+            <div className="timeline-card"><strong>4. Reports before final lock</strong><div className="kicker">Check summary, situational call sheet, money down, and defensive outcomes before export.</div></div>
+            <div className="timeline-card"><strong>5. Coach handoff</strong><div className="kicker">Share the PDF/XLSX packet, then return to Game Admin to mark final.</div></div>
+          </div>
         </section>
 
         <section className="section-card pad-lg stack-md">
