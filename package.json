@@ -13,6 +13,7 @@
     "go-test": "npm run go-test:gate",
     "closeout:gate": "tsx scripts/postgame-closeout-gate.ts",
     "pilot:rehearsal": "tsx scripts/pilot-rehearsal.ts",
+    "db:probe": "tsx scripts/db-probe.ts",
     "smoke:install": "playwright install chromium",
     "smoke:seed": "tsx scripts/seed-smoke.ts --mode baseline",
     "smoke:seed:full": "tsx scripts/seed-smoke.ts --mode full",

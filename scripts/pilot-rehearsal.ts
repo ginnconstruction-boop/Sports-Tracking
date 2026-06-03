@@ -110,6 +110,7 @@ async function main() {
   const steps: Step[] = [
     { label: "Typecheck", command: "npm run typecheck" },
     { label: "Unit tests", command: "npm run test" },
+    ...(strictCloseout ? [{ label: "DB probe", command: "npm run db:probe" }] : []),
     {
       label: "Smoke on rehearsal game",
       command: "npm run smoke:test",

@@ -1,20 +1,23 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "@/server/db/schema";
+import { resolveDatabaseConnectionConfig } from "@/server/db/connection";
 
-const connectionString = process.env.DATABASE_URL;
 let client: ReturnType<typeof postgres> | null = null;
+let cachedConnectionString: string | null = null;
 
 export function getDb() {
-  if (!connectionString) {
-    throw new Error("DATABASE_URL is not configured.");
+  const connection = resolveDatabaseConnectionConfig();
+  if (!connection.connectionString) {
+    throw new Error("DATABASE_URL or DATABASE_POOLER_URL is not configured.");
   }
 
-  if (!client) {
-    client = postgres(connectionString, {
+  if (!client || cachedConnectionString !== connection.connectionString) {
+    client = postgres(connection.connectionString, {
       prepare: false,
       max: 10
     });
+    cachedConnectionString = connection.connectionString;
   }
 
   return drizzle(client, { schema });
